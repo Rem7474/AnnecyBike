@@ -150,6 +150,31 @@ func (p *Pool) InsertTrip(ctx context.Context,
 	return err
 }
 
+// FetchBikePathPoints returns ordered (lat, lon) pairs for free-floating snapshots
+// of a given bike between from and to, used for GPS-path distance calculation.
+func (p *Pool) FetchBikePathPoints(ctx context.Context, bikeID string, from, to time.Time) ([][2]float64, error) {
+	rows, err := p.Pool.Query(ctx, `
+		SELECT lat, lon FROM bike_snapshots
+		WHERE bike_id = $1
+		  AND time >= $2 AND time <= $3
+		  AND station_id IS NULL
+		ORDER BY time ASC
+	`, bikeID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var pts [][2]float64
+	for rows.Next() {
+		var lat, lon float64
+		if err := rows.Scan(&lat, &lon); err == nil {
+			pts = append(pts, [2]float64{lat, lon})
+		}
+	}
+	return pts, rows.Err()
+}
+
 // NotifyPollDone sends a PostgreSQL NOTIFY so the backend can push WS updates.
 func (p *Pool) NotifyPollDone(ctx context.Context) error {
 	conn, err := p.Acquire(ctx)

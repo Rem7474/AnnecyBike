@@ -23,13 +23,16 @@ func GetTrips(pool *db.Pool) gin.HandlerFunc {
 		from, to := parseTimeRange(c, 7*24*time.Hour)
 
 		query := `
-			SELECT id, bike_id, start_time, end_time,
-				start_station_id, end_station_id,
-				start_lat, start_lon, end_lat, end_lon,
-				distance_meters, battery_start, battery_end, battery_delta,
-				EXTRACT(EPOCH FROM (end_time - start_time)) / 60.0 AS duration_minutes
-			FROM trips
-			WHERE start_time BETWEEN $1 AND $2
+			SELECT t.id, t.bike_id, t.start_time, t.end_time,
+				t.start_station_id, t.end_station_id,
+				ss.name AS start_station_name, es.name AS end_station_name,
+				t.start_lat, t.start_lon, t.end_lat, t.end_lon,
+				t.distance_meters, t.battery_start, t.battery_end, t.battery_delta,
+				EXTRACT(EPOCH FROM (t.end_time - t.start_time)) / 60.0 AS duration_minutes
+			FROM trips t
+			LEFT JOIN stations ss ON ss.station_id = t.start_station_id
+			LEFT JOIN stations es ON es.station_id = t.end_station_id
+			WHERE t.start_time BETWEEN $1 AND $2
 		`
 		args := []any{from, to}
 		argIdx := 3
@@ -72,14 +75,17 @@ func GetBikeTrips(pool *db.Pool) gin.HandlerFunc {
 		}
 
 		rows, err := pool.Query(c.Request.Context(), `
-			SELECT id, bike_id, start_time, end_time,
-				start_station_id, end_station_id,
-				start_lat, start_lon, end_lat, end_lon,
-				distance_meters, battery_start, battery_end, battery_delta,
-				EXTRACT(EPOCH FROM (end_time - start_time)) / 60.0 AS duration_minutes
-			FROM trips
-			WHERE bike_id = $1
-			ORDER BY start_time DESC
+			SELECT t.id, t.bike_id, t.start_time, t.end_time,
+				t.start_station_id, t.end_station_id,
+				ss.name AS start_station_name, es.name AS end_station_name,
+				t.start_lat, t.start_lon, t.end_lat, t.end_lon,
+				t.distance_meters, t.battery_start, t.battery_end, t.battery_delta,
+				EXTRACT(EPOCH FROM (t.end_time - t.start_time)) / 60.0 AS duration_minutes
+			FROM trips t
+			LEFT JOIN stations ss ON ss.station_id = t.start_station_id
+			LEFT JOIN stations es ON es.station_id = t.end_station_id
+			WHERE t.bike_id = $1
+			ORDER BY t.start_time DESC
 			LIMIT $2 OFFSET $3
 		`, bikeID, limit, offset)
 		if err != nil {
@@ -105,6 +111,7 @@ func scanTrip(row scanner) models.Trip {
 	_ = row.Scan(
 		&t.ID, &t.BikeID, &t.StartTime, &t.EndTime,
 		&t.StartStationID, &t.EndStationID,
+		&t.StartStationName, &t.EndStationName,
 		&t.StartLat, &t.StartLon, &t.EndLat, &t.EndLon,
 		&t.DistanceMeters, &t.BatteryStart, &t.BatteryEnd, &t.BatteryDelta,
 		&t.DurationMinutes,

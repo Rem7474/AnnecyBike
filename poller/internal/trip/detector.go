@@ -100,8 +100,23 @@ func (d *Detector) Process(ctx context.Context, now time.Time, current map[strin
 	}
 }
 
+// gpsPathDistance sums haversine distances between consecutive free-floating
+// snapshots recorded during the trip. Falls back to point-to-point haversine
+// when fewer than 2 GPS points exist (e.g. very short trips).
+func (d *Detector) gpsPathDistance(ctx context.Context, bikeID string, startTime, endTime time.Time, startLat, startLon, endLat, endLon float64) int {
+	pts, err := d.db.FetchBikePathPoints(ctx, bikeID, startTime, endTime)
+	if err != nil || len(pts) < 2 {
+		return haversine(startLat, startLon, endLat, endLon)
+	}
+	var total float64
+	for i := 1; i < len(pts); i++ {
+		total += haversineRaw(pts[i-1][0], pts[i-1][1], pts[i][0], pts[i][1])
+	}
+	return int(total)
+}
+
 func (d *Detector) closeTrip(ctx context.Context, bikeID string, ot openTrip, endTime time.Time, endState BikeState) {
-	dist := haversine(ot.startLat, ot.startLon, endState.Lat, endState.Lon)
+	dist := d.gpsPathDistance(ctx, bikeID, ot.startTime, endTime, ot.startLat, ot.startLon, endState.Lat, endState.Lon)
 	err := d.db.InsertTrip(ctx,
 		bikeID,
 		ot.startTime, endTime,
@@ -121,18 +136,20 @@ func (d *Detector) closeTrip(ctx context.Context, bikeID string, ot openTrip, en
 	)
 }
 
-// haversine returns the straight-line distance in meters × 1.3 (routing correction).
-func haversine(lat1, lon1, lat2, lon2 float64) int {
-	const R = 6_371_000.0 // Earth radius in meters
+func haversineRaw(lat1, lon1, lat2, lon2 float64) float64 {
+	const R = 6_371_000.0
 	φ1 := lat1 * math.Pi / 180
 	φ2 := lat2 * math.Pi / 180
 	Δφ := (lat2 - lat1) * math.Pi / 180
 	Δλ := (lon2 - lon1) * math.Pi / 180
-
 	a := math.Sin(Δφ/2)*math.Sin(Δφ/2) +
 		math.Cos(φ1)*math.Cos(φ2)*math.Sin(Δλ/2)*math.Sin(Δλ/2)
-	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
-	return int(R * c * 1.3)
+	return R * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+}
+
+// haversine returns straight-line distance × 1.3 as fallback when GPS path is unavailable.
+func haversine(lat1, lon1, lat2, lon2 float64) int {
+	return int(haversineRaw(lat1, lon1, lat2, lon2) * 1.3)
 }
 
 func stationStr(s *string) string {

@@ -82,21 +82,23 @@ type BikeHealth struct {
 }
 
 type Trip struct {
-	ID              int64      `json:"id"`
-	BikeID          string     `json:"bike_id"`
-	StartTime       time.Time  `json:"start_time"`
-	EndTime         *time.Time `json:"end_time,omitempty"`
-	StartStationID  *string    `json:"start_station_id,omitempty"`
-	EndStationID    *string    `json:"end_station_id,omitempty"`
-	StartLat        float64    `json:"start_lat"`
-	StartLon        float64    `json:"start_lon"`
-	EndLat          float64    `json:"end_lat"`
-	EndLon          float64    `json:"end_lon"`
-	DistanceMeters  *int       `json:"distance_meters,omitempty"`
-	BatteryStart    *int       `json:"battery_start,omitempty"`
-	BatteryEnd      *int       `json:"battery_end,omitempty"`
-	BatteryDelta    *int       `json:"battery_delta,omitempty"`
-	DurationMinutes *float64   `json:"duration_minutes,omitempty"`
+	ID                int64      `json:"id"`
+	BikeID            string     `json:"bike_id"`
+	StartTime         time.Time  `json:"start_time"`
+	EndTime           *time.Time `json:"end_time,omitempty"`
+	StartStationID    *string    `json:"start_station_id,omitempty"`
+	EndStationID      *string    `json:"end_station_id,omitempty"`
+	StartStationName  *string    `json:"start_station_name,omitempty"`
+	EndStationName    *string    `json:"end_station_name,omitempty"`
+	StartLat          float64    `json:"start_lat"`
+	StartLon          float64    `json:"start_lon"`
+	EndLat            float64    `json:"end_lat"`
+	EndLon            float64    `json:"end_lon"`
+	DistanceMeters    *int       `json:"distance_meters,omitempty"`
+	BatteryStart      *int       `json:"battery_start,omitempty"`
+	BatteryEnd        *int       `json:"battery_end,omitempty"`
+	BatteryDelta      *int       `json:"battery_delta,omitempty"`
+	DurationMinutes   *float64   `json:"duration_minutes,omitempty"`
 }
 
 type FleetStats struct {

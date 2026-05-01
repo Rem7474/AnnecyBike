@@ -77,6 +77,8 @@ export interface Trip {
   end_time?: string
   start_station_id?: string
   end_station_id?: string
+  start_station_name?: string
+  end_station_name?: string
   start_lat: number
   start_lon: number
   end_lat: number

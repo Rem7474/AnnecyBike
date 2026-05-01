@@ -58,12 +58,21 @@ func GetStation(pool *db.Pool) gin.HandlerFunc {
 		var st models.Station
 		var vtCapJSON []byte
 		err := pool.QueryRow(c.Request.Context(), `
-			SELECT station_id, name, lat, lon, capacity,
-				vehicle_type_capacity, is_virtual_station, is_charging_station, last_updated
-			FROM stations WHERE station_id = $1
+			SELECT s.station_id, s.name, s.lat, s.lon, s.capacity,
+				s.vehicle_type_capacity, s.is_virtual_station, s.is_charging_station, s.last_updated,
+				ss.num_bikes_available, ss.num_docks_available
+			FROM stations s
+			LEFT JOIN LATERAL (
+				SELECT num_bikes_available, num_docks_available
+				FROM station_snapshots
+				WHERE station_id = s.station_id
+				ORDER BY time DESC LIMIT 1
+			) ss ON true
+			WHERE s.station_id = $1
 		`, stationID).Scan(
 			&st.StationID, &st.Name, &st.Lat, &st.Lon, &st.Capacity,
 			&vtCapJSON, &st.IsVirtualStation, &st.IsChargingStation, &st.LastUpdated,
+			&st.NumBikesAvailable, &st.NumDocksAvailable,
 		)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "station not found"})

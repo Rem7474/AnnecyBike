@@ -11,11 +11,14 @@ const S: Record<string, React.CSSProperties> = {
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 13 },
   th: { textAlign: 'left', padding: '8px 10px', color: '#64748b', borderBottom: '1px solid #334155' },
   td: { padding: '10px 10px', borderBottom: '1px solid #1e293b', verticalAlign: 'middle' },
-  badge: (h: number): React.CSSProperties => ({
+}
+
+function badgeStyle(h: number): React.CSSProperties {
+  return {
     display: 'inline-block', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600,
     background: h > 48 ? '#7f1d1d' : h > 24 ? '#7c2d12' : '#1c1917',
     color: h > 48 ? '#fca5a5' : h > 24 ? '#fdba74' : '#a8a29e',
-  }),
+  }
 }
 
 export function AnomaliesPage() {
@@ -78,7 +81,7 @@ export function AnomaliesPage() {
                     </td>
                     <td style={S.td}>{a.vehicle_type_id}</td>
                     <td style={S.td}>
-                      <span style={S.badge(a.hours_outside)}>
+                      <span style={badgeStyle(a.hours_outside)}>
                         {a.hours_outside.toFixed(0)}h
                       </span>
                     </td>

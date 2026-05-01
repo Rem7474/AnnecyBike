@@ -229,7 +229,7 @@ export function BikeDetailPage() {
                     : '—'}
                 </td>
                 <td style={{ ...S.td, fontSize: 11, color: '#64748b' }}>
-                  {t.start_station_id?.slice(0, 8) ?? '?'} → {t.end_station_id?.slice(0, 8) ?? '?'}
+                  {t.start_station_name ?? t.start_station_id?.slice(0, 8) ?? '?'} → {t.end_station_name ?? t.end_station_id?.slice(0, 8) ?? '?'}
                 </td>
               </tr>
             ))}
