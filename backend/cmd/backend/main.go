@@ -57,19 +57,27 @@ func main() {
 	v1 := r.Group("/api/v1")
 	{
 		v1.GET("/bikes/live", handlers.GetBikesLive(pool))
+		v1.GET("/bikes/nearest", handlers.GetNearestBikes(pool))
 		v1.GET("/bikes", handlers.GetBikes(pool))
 		v1.GET("/bikes/:id", handlers.GetBike(pool))
 		v1.GET("/bikes/:id/history", handlers.GetBikeHistory(pool))
 		v1.GET("/bikes/:id/trips", handlers.GetBikeTrips(pool))
 		v1.GET("/bikes/:id/stats", handlers.GetBikeStats(pool))
+		v1.GET("/bikes/:id/health", handlers.GetBikeHealth(pool))
 
 		v1.GET("/stations/live", handlers.GetStationsLive(pool))
+		v1.GET("/stations/nearest", handlers.GetNearestStations(pool))
 		v1.GET("/stations/:id", handlers.GetStation(pool))
 		v1.GET("/stations/:id/history", handlers.GetStationHistory(pool))
 
 		v1.GET("/trips", handlers.GetTrips(pool))
 
+		v1.GET("/anomalies", handlers.GetAnomalies(pool))
+
+		v1.GET("/replay", handlers.GetReplay(pool))
+
 		v1.GET("/stats/fleet", handlers.GetFleetStats(pool))
+		v1.GET("/stats/heatmap", handlers.GetHeatmap(pool))
 		v1.GET("/stats/trips-per-day", handlers.GetTripsPerDay(pool))
 		v1.GET("/stats/battery-distribution", handlers.GetBatteryDistribution(pool))
 		v1.GET("/stats/busiest-stations", handlers.GetBusiestStations(pool))

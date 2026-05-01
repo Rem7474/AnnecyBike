@@ -96,12 +96,18 @@ func GetBikeHistory(pool *db.Pool) gin.HandlerFunc {
 		from, to := parseTimeRange(c, 24*time.Hour)
 		resolution := c.DefaultQuery("resolution", "raw")
 
-		var rows interface{ Close() }
+		type pgRows interface {
+			Next() bool
+			Scan(...any) error
+			Close()
+		}
+
+		var pgr pgRows
 		var err error
 
 		switch resolution {
 		case "1h":
-			rows, err = pool.Query(c.Request.Context(), `
+			pgr, err = pool.Query(c.Request.Context(), `
 				SELECT time_bucket('1 hour', time) AS time,
 					AVG(lat) AS lat, AVG(lon) AS lon,
 					MODE() WITHIN GROUP (ORDER BY station_id) AS station_id,
@@ -112,7 +118,7 @@ func GetBikeHistory(pool *db.Pool) gin.HandlerFunc {
 				GROUP BY 1 ORDER BY 1
 			`, bikeID, from, to)
 		case "1d":
-			rows, err = pool.Query(c.Request.Context(), `
+			pgr, err = pool.Query(c.Request.Context(), `
 				SELECT time_bucket('1 day', time) AS time,
 					AVG(lat) AS lat, AVG(lon) AS lon,
 					MODE() WITHIN GROUP (ORDER BY station_id) AS station_id,
@@ -123,7 +129,7 @@ func GetBikeHistory(pool *db.Pool) gin.HandlerFunc {
 				GROUP BY 1 ORDER BY 1
 			`, bikeID, from, to)
 		default:
-			rows, err = pool.Query(c.Request.Context(), `
+			pgr, err = pool.Query(c.Request.Context(), `
 				SELECT time, lat, lon, station_id, is_disabled, current_range_meters
 				FROM bike_snapshots
 				WHERE bike_id = $1 AND time BETWEEN $2 AND $3
@@ -136,14 +142,6 @@ func GetBikeHistory(pool *db.Pool) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-
-		// rows is pgx.Rows in all cases
-		type pgRows interface {
-			Next() bool
-			Scan(...any) error
-			Close()
-		}
-		pgr := rows.(pgRows)
 		defer pgr.Close()
 
 		result := make([]models.BikeSnapshot, 0)
@@ -167,13 +165,11 @@ func GetBikeStats(pool *db.Pool) gin.HandlerFunc {
 		var stats models.BikeStats
 		stats.BikeID = bikeID
 
-		// Total trips and distance
 		_ = pool.QueryRow(ctx, `
 			SELECT COUNT(*), COALESCE(SUM(distance_meters), 0) / 1000.0
 			FROM trips WHERE bike_id = $1 AND end_time IS NOT NULL
 		`, bikeID).Scan(&stats.TotalTrips, &stats.TotalDistanceKm)
 
-		// Average battery %
 		var avgRange *float64
 		_ = pool.QueryRow(ctx, `
 			SELECT AVG(current_range_meters) FROM bike_snapshots
@@ -183,7 +179,6 @@ func GetBikeStats(pool *db.Pool) gin.HandlerFunc {
 			stats.AvgBatteryPct = batteryPct(int(*avgRange))
 		}
 
-		// Availability and disabled ratios (last 7 days)
 		var total, disabled int
 		_ = pool.QueryRow(ctx, `
 			SELECT COUNT(*), COUNT(*) FILTER (WHERE is_disabled)
@@ -199,7 +194,170 @@ func GetBikeStats(pool *db.Pool) gin.HandlerFunc {
 	}
 }
 
-// batteryPct converts current_range_meters to a percentage (max 45000m).
+func GetBikeHealth(pool *db.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		bikeID := c.Param("id")
+		ctx := c.Request.Context()
+
+		var h models.BikeHealth
+		h.BikeID = bikeID
+
+		// Average battery last 30 days
+		var avgRange *float64
+		_ = pool.QueryRow(ctx, `
+			SELECT AVG(current_range_meters)
+			FROM bike_snapshots
+			WHERE bike_id = $1 AND time > NOW() - INTERVAL '30 days'
+		`, bikeID).Scan(&avgRange)
+		if avgRange != nil {
+			h.AvgBatteryPct = batteryPct(int(*avgRange))
+		}
+
+		// Disabled incidents (distinct days with is_disabled=true) last 30 days
+		_ = pool.QueryRow(ctx, `
+			SELECT COUNT(DISTINCT DATE(time))
+			FROM bike_snapshots
+			WHERE bike_id = $1
+			  AND time > NOW() - INTERVAL '30 days'
+			  AND is_disabled = TRUE
+		`, bikeID).Scan(&h.DisabledCount30d)
+
+		// Trips last 30 days
+		_ = pool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM trips
+			WHERE bike_id = $1
+			  AND start_time > NOW() - INTERVAL '30 days'
+			  AND end_time IS NOT NULL
+		`, bikeID).Scan(&h.Trips30d)
+
+		// Score calculation
+		h.BatteryScore = h.AvgBatteryPct * 40 / 100 // max 40 pts
+		reliability := 30 - h.DisabledCount30d*3
+		if reliability < 0 {
+			reliability = 0
+		}
+		h.ReliabilityScore = reliability
+		activity := h.Trips30d
+		if activity > 30 {
+			activity = 30
+		}
+		h.ActivityScore = activity
+		h.HealthScore = h.BatteryScore + h.ReliabilityScore + h.ActivityScore
+
+		switch {
+		case h.HealthScore >= 70:
+			h.Label = "Bon"
+		case h.HealthScore >= 40:
+			h.Label = "Moyen"
+		default:
+			h.Label = "À réviser"
+		}
+
+		c.JSON(http.StatusOK, h)
+	}
+}
+
+// GetNearestBikes returns the N closest available docked bikes to a lat/lon.
+func GetNearestBikes(pool *db.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		lat, errLat := strconv.ParseFloat(c.Query("lat"), 64)
+		lon, errLon := strconv.ParseFloat(c.Query("lon"), 64)
+		if errLat != nil || errLon != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "lat and lon required"})
+			return
+		}
+		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "5"))
+
+		rows, err := pool.Query(c.Request.Context(), `
+			WITH latest AS (
+				SELECT DISTINCT ON (bs.bike_id)
+					bs.bike_id, b.vehicle_type_id,
+					bs.lat, bs.lon, bs.current_range_meters
+				FROM bike_snapshots bs
+				JOIN bikes b ON b.bike_id = bs.bike_id
+				WHERE bs.time > NOW() - INTERVAL '2 minutes'
+				  AND bs.is_disabled = FALSE
+				  AND bs.is_reserved = FALSE
+				  AND bs.station_id IS NOT NULL
+				ORDER BY bs.bike_id, bs.time DESC
+			)
+			SELECT bike_id, vehicle_type_id, lat, lon, current_range_meters,
+				SQRT(
+					POW((lat - $1) * 111320, 2) +
+					POW((lon - $2) * 111320 * COS(RADIANS($1)), 2)
+				)::INT AS distance_m
+			FROM latest
+			ORDER BY distance_m
+			LIMIT $3
+		`, lat, lon, limit)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+
+		result := make([]models.NearestBike, 0, limit)
+		for rows.Next() {
+			var b models.NearestBike
+			if err := rows.Scan(&b.BikeID, &b.VehicleTypeID, &b.Lat, &b.Lon, &b.CurrentRangeMeters, &b.DistanceMeters); err != nil {
+				continue
+			}
+			b.BatteryPct = batteryPct(b.CurrentRangeMeters)
+			result = append(result, b)
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// GetNearestStations returns the N closest stations with available docks to a lat/lon.
+func GetNearestStations(pool *db.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		lat, errLat := strconv.ParseFloat(c.Query("lat"), 64)
+		lon, errLon := strconv.ParseFloat(c.Query("lon"), 64)
+		if errLat != nil || errLon != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "lat and lon required"})
+			return
+		}
+		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "5"))
+
+		rows, err := pool.Query(c.Request.Context(), `
+			WITH latest_ss AS (
+				SELECT DISTINCT ON (station_id)
+					station_id, num_docks_available
+				FROM station_snapshots
+				WHERE time > NOW() - INTERVAL '2 minutes'
+				ORDER BY station_id, time DESC
+			)
+			SELECT s.station_id, s.name, s.lat, s.lon,
+				COALESCE(ss.num_docks_available, 0) AS num_docks_available,
+				SQRT(
+					POW((s.lat - $1) * 111320, 2) +
+					POW((s.lon - $2) * 111320 * COS(RADIANS($1)), 2)
+				)::INT AS distance_m
+			FROM stations s
+			LEFT JOIN latest_ss ss ON ss.station_id = s.station_id
+			WHERE COALESCE(ss.num_docks_available, 0) > 0
+			ORDER BY distance_m
+			LIMIT $3
+		`, lat, lon, limit)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+
+		result := make([]models.NearestStation, 0, limit)
+		for rows.Next() {
+			var s models.NearestStation
+			if err := rows.Scan(&s.StationID, &s.Name, &s.Lat, &s.Lon, &s.NumDocksAvailable, &s.DistanceMeters); err != nil {
+				continue
+			}
+			result = append(result, s)
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
 func batteryPct(rangeMeters int) int {
 	const maxRange = 45_000
 	if rangeMeters <= 0 {

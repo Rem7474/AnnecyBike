@@ -58,6 +58,18 @@ export interface BikeStats {
   disabled_pct: number
 }
 
+export interface BikeHealth {
+  bike_id: string
+  health_score: number
+  battery_score: number
+  reliability_score: number
+  activity_score: number
+  avg_battery_pct: number
+  disabled_count_30d: number
+  trips_30d: number
+  label: string
+}
+
 export interface Trip {
   id: number
   bike_id: string
@@ -101,8 +113,62 @@ export interface BusiestStation {
   trip_count: number
 }
 
+export interface HeatPoint {
+  lat: number
+  lon: number
+  weight: number
+}
+
+export interface Anomaly {
+  bike_id: string
+  vehicle_type_id: string
+  lat: number
+  lon: number
+  last_seen: string
+  hours_outside: number
+}
+
+export interface NearestBike {
+  bike_id: string
+  vehicle_type_id: string
+  lat: number
+  lon: number
+  current_range_meters: number
+  battery_pct: number
+  distance_m: number
+}
+
+export interface NearestStation {
+  station_id: string
+  name: string
+  lat: number
+  lon: number
+  num_docks_available: number
+  distance_m: number
+}
+
+export interface ReplayBike {
+  b: string   // bike_id
+  la: number  // lat
+  lo: number  // lon
+  s?: string  // station_id
+}
+
+export interface ReplayBucket {
+  time: string
+  snapshots: ReplayBike[]
+}
+
 export interface WSMessage {
   type: 'snapshot'
   bikes: BikeLive[]
   stations: Station[]
+}
+
+export interface MapFilters {
+  minBattery: number
+  showElectric: boolean
+  showManual: boolean
+  hideDisabled: boolean
+  showHeatmap: boolean
 }

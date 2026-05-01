@@ -118,6 +118,57 @@ func GetBatteryDistribution(pool *db.Pool) gin.HandlerFunc {
 	}
 }
 
+// GetHeatmap returns trip start+end points for the heatmap layer.
+func GetHeatmap(pool *db.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		days, _ := strconv.Atoi(c.DefaultQuery("days", "30"))
+		if days > 365 {
+			days = 365
+		}
+
+		rows, err := pool.Query(c.Request.Context(), `
+			SELECT lat, lon, weight FROM (
+				SELECT ROUND(start_lat::numeric, 4) AS lat,
+				       ROUND(start_lon::numeric, 4) AS lon,
+				       COUNT(*) AS weight
+				FROM trips
+				WHERE start_time > NOW() - ($1 || ' days')::INTERVAL
+				  AND start_lat IS NOT NULL
+				GROUP BY 1, 2
+
+				UNION ALL
+
+				SELECT ROUND(end_lat::numeric, 4),
+				       ROUND(end_lon::numeric, 4),
+				       COUNT(*)
+				FROM trips
+				WHERE start_time > NOW() - ($1 || ' days')::INTERVAL
+				  AND end_lat IS NOT NULL
+				  AND end_station_id IS NOT NULL
+				GROUP BY 1, 2
+			) combined
+			WHERE weight > 0
+			ORDER BY weight DESC
+			LIMIT 5000
+		`, strconv.Itoa(days))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+
+		result := make([]models.HeatPoint, 0)
+		for rows.Next() {
+			var h models.HeatPoint
+			if err := rows.Scan(&h.Lat, &h.Lon, &h.Weight); err != nil {
+				continue
+			}
+			result = append(result, h)
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
 func GetBusiestStations(pool *db.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))

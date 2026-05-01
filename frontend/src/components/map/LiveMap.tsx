@@ -1,8 +1,14 @@
-import { useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
-import { Icon, DivIcon, type Map as LeafletMap } from 'leaflet'
-import type { BikeLive, Station } from '../../types'
+import { Icon, DivIcon } from 'leaflet'
+import type { BikeLive, Station, MapFilters, HeatPoint } from '../../types'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '../../api'
+import { HeatmapLayer } from './HeatmapLayer'
+import { MapFiltersPanel } from './MapFilters'
+import { NearestBikeControl } from './NearestBike'
+import { ReplayPlayerInner } from './ReplayPlayer'
 
 delete (Icon.Default.prototype as any)._getIconUrl
 Icon.Default.mergeOptions({
@@ -47,54 +53,64 @@ function stationIcon(avail: number, cap: number) {
   return new DivIcon({ html, className: '', iconSize: [36, 36], iconAnchor: [18, 18] })
 }
 
-// Bouton de géolocalisation injecté dans la carte Leaflet
 function GeolocateControl() {
   const map = useMap()
-
   const locate = () => {
     map.locate({ setView: true, maxZoom: 16 })
     map.once('locationerror', () => alert('Géolocalisation refusée ou indisponible.'))
   }
-
   return (
-    <div
-      onClick={locate}
-      title="Ma position"
-      style={{
-        position: 'absolute', bottom: 24, right: 12, zIndex: 1000,
-        width: 36, height: 36, borderRadius: 8,
-        background: 'white', border: '2px solid #cbd5e1',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.25)',
-        fontSize: 18,
-      }}
-    >
-      ⊕
+    <div onClick={locate} title="Ma position" style={{
+      position: 'absolute', bottom: 24, right: 12, zIndex: 1000,
+      width: 36, height: 36, borderRadius: 8,
+      background: 'white', border: '2px solid #cbd5e1',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.25)', fontSize: 18,
+    }}>⊕</div>
+  )
+}
+
+function ReplayToggle({ active, onToggle }: { active: boolean; onToggle: () => void }) {
+  return (
+    <div onClick={onToggle} title="Replay temporel" style={{
+      position: 'absolute', bottom: 68, left: 12, zIndex: 1000,
+      background: active ? '#3b82f6' : 'rgba(15,23,42,0.92)',
+      border: '1px solid #334155', borderRadius: 8,
+      padding: '7px 12px', color: '#f1f5f9',
+      fontSize: 12, cursor: 'pointer', backdropFilter: 'blur(6px)',
+    }}>
+      ⏱ Replay
     </div>
   )
 }
 
-interface Props {
+// Electric vehicle type IDs (from GBFS data: 1,2,4,5,6,7,15 = electric, 10,14 = human)
+const ELECTRIC_IDS = new Set(['1', '2', '4', '5', '6', '7', '15'])
+
+interface MapContentProps {
   bikes: BikeLive[]
   stations: Station[]
+  filters: MapFilters
+  heatPoints: HeatPoint[]
+  showReplay: boolean
+  onCloseReplay: () => void
 }
 
-export function LiveMap({ bikes, stations }: Props) {
+function MapContent({ bikes, stations, filters, heatPoints, showReplay, onCloseReplay }: MapContentProps) {
   const navigate = useNavigate()
 
-  return (
-    <MapContainer
-      center={[45.899, 6.129]}
-      zoom={14}
-      style={{ flex: 1, width: '100%', position: 'relative' }}
-      preferCanvas={false}
-    >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
+  const filteredBikes = bikes.filter((b) => {
+    if (filters.hideDisabled && b.is_disabled) return false
+    if (b.battery_pct < filters.minBattery) return false
+    const isElectric = ELECTRIC_IDS.has(b.vehicle_type_id)
+    if (!filters.showElectric && isElectric) return false
+    if (!filters.showManual && !isElectric) return false
+    return true
+  })
 
-      <GeolocateControl />
+  return (
+    <>
+      {filters.showHeatmap && <HeatmapLayer points={heatPoints} />}
 
       {stations.map((st) => {
         const avail = st.num_bikes_available ?? 0
@@ -109,18 +125,16 @@ export function LiveMap({ bikes, stations }: Props) {
             <Popup>
               <strong>{st.name}</strong><br />
               <span style={{ color: avail > 0 ? 'green' : 'gray' }}>
-                {avail} vélo{avail > 1 ? 's' : ''} disponible{avail > 1 ? 's' : ''}
-              </span>
-              <br />
-              {st.num_docks_available ?? '?'} dock{(st.num_docks_available ?? 0) > 1 ? 's' : ''} libre{(st.num_docks_available ?? 0) > 1 ? 's' : ''}
-              <br />
-              <small style={{ color: '#888' }}>Capacité totale : {cap}</small>
+                {avail} vélo{avail !== 1 ? 's' : ''} disponible{avail !== 1 ? 's' : ''}
+              </span><br />
+              {st.num_docks_available ?? '?'} dock{(st.num_docks_available ?? 0) !== 1 ? 's' : ''} libre{(st.num_docks_available ?? 0) !== 1 ? 's' : ''}<br />
+              <small style={{ color: '#888' }}>Capacité : {cap}</small>
             </Popup>
           </Marker>
         )
       })}
 
-      {bikes.map((bike) => (
+      {!showReplay && filteredBikes.map((bike) => (
         <Marker
           key={bike.bike_id}
           position={[bike.lat, bike.lon]}
@@ -134,6 +148,60 @@ export function LiveMap({ bikes, stations }: Props) {
           </Popup>
         </Marker>
       ))}
-    </MapContainer>
+
+      <GeolocateControl />
+      <NearestBikeControl />
+      <ReplayToggle active={showReplay} onToggle={onCloseReplay} />
+      {showReplay && <ReplayPlayerInner onClose={onCloseReplay} />}
+    </>
+  )
+}
+
+interface Props {
+  bikes: BikeLive[]
+  stations: Station[]
+}
+
+const DEFAULT_FILTERS: MapFilters = {
+  minBattery: 0,
+  showElectric: true,
+  showManual: true,
+  hideDisabled: false,
+  showHeatmap: false,
+}
+
+export function LiveMap({ bikes, stations }: Props) {
+  const [filters, setFilters] = useState<MapFilters>(DEFAULT_FILTERS)
+  const [showReplay, setShowReplay] = useState(false)
+
+  const { data: heatPoints = [] } = useQuery({
+    queryKey: ['heatmap'],
+    queryFn: () => api.stats.heatmap(30),
+    enabled: filters.showHeatmap,
+    staleTime: 5 * 60_000,
+  })
+
+  return (
+    <div style={{ flex: 1, position: 'relative' }}>
+      <MapFiltersPanel filters={filters} onChange={setFilters} />
+      <MapContainer
+        center={[45.899, 6.129]}
+        zoom={14}
+        style={{ height: '100%', width: '100%' }}
+      >
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <MapContent
+          bikes={bikes}
+          stations={stations}
+          filters={filters}
+          heatPoints={heatPoints}
+          showReplay={showReplay}
+          onCloseReplay={() => setShowReplay((v) => !v)}
+        />
+      </MapContainer>
+    </div>
   )
 }

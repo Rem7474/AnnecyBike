@@ -1,4 +1,8 @@
-import type { Bike, BikeLive, BikeSnapshot, BikeStats, BusiestStation, BatteryBucket, DailyCount, FleetStats, Station, Trip } from '../types'
+import type {
+  Anomaly, Bike, BikeLive, BikeHealth, BikeSnapshot, BikeStats,
+  BusiestStation, BatteryBucket, DailyCount, FleetStats,
+  HeatPoint, NearestBike, NearestStation, ReplayBucket, Station, Trip,
+} from '../types'
 
 const BASE = '/api/v1'
 
@@ -14,26 +18,31 @@ export const api = {
     list: (limit = 100, offset = 0) => get<Bike[]>(`${BASE}/bikes?limit=${limit}&offset=${offset}`),
     get: (id: string) => get<Bike>(`${BASE}/bikes/${id}`),
     history: (id: string, from?: string, to?: string, resolution = 'raw') => {
-      const params = new URLSearchParams({ resolution })
-      if (from) params.set('from', from)
-      if (to) params.set('to', to)
-      return get<BikeSnapshot[]>(`${BASE}/bikes/${id}/history?${params}`)
+      const p = new URLSearchParams({ resolution })
+      if (from) p.set('from', from)
+      if (to) p.set('to', to)
+      return get<BikeSnapshot[]>(`${BASE}/bikes/${id}/history?${p}`)
     },
     trips: (id: string, limit = 50, offset = 0) =>
       get<Trip[]>(`${BASE}/bikes/${id}/trips?limit=${limit}&offset=${offset}`),
     stats: (id: string) => get<BikeStats>(`${BASE}/bikes/${id}/stats`),
+    health: (id: string) => get<BikeHealth>(`${BASE}/bikes/${id}/health`),
+    nearest: (lat: number, lon: number, limit = 5) =>
+      get<NearestBike[]>(`${BASE}/bikes/nearest?lat=${lat}&lon=${lon}&limit=${limit}`),
   },
   stations: {
     live: () => get<Station[]>(`${BASE}/stations/live`),
     get: (id: string) => get<Station>(`${BASE}/stations/${id}`),
     history: (id: string, from?: string, to?: string) => {
-      const params = new URLSearchParams()
-      if (from) params.set('from', from)
-      if (to) params.set('to', to)
+      const p = new URLSearchParams()
+      if (from) p.set('from', from)
+      if (to) p.set('to', to)
       return get<{ time: string; num_bikes_available: number; num_docks_available: number }[]>(
-        `${BASE}/stations/${id}/history?${params}`
+        `${BASE}/stations/${id}/history?${p}`
       )
     },
+    nearest: (lat: number, lon: number, limit = 5) =>
+      get<NearestStation[]>(`${BASE}/stations/nearest?lat=${lat}&lon=${lon}&limit=${limit}`),
   },
   trips: {
     list: (params: { bike_id?: string; station_id?: string; from?: string; to?: string; limit?: number }) => {
@@ -42,8 +51,16 @@ export const api = {
       return get<Trip[]>(`${BASE}/trips?${p}`)
     },
   },
+  anomalies: {
+    list: () => get<Anomaly[]>(`${BASE}/anomalies`),
+  },
+  replay: {
+    get: (date: string, resolution = 10) =>
+      get<ReplayBucket[]>(`${BASE}/replay?date=${date}&resolution=${resolution}`),
+  },
   stats: {
     fleet: () => get<FleetStats>(`${BASE}/stats/fleet`),
+    heatmap: (days = 30) => get<HeatPoint[]>(`${BASE}/stats/heatmap?days=${days}`),
     tripsPerDay: (days = 30) => get<DailyCount[]>(`${BASE}/stats/trips-per-day?days=${days}`),
     batteryDistribution: () => get<BatteryBucket[]>(`${BASE}/stats/battery-distribution`),
     busiestStations: (limit = 10) => get<BusiestStation[]>(`${BASE}/stats/busiest-stations?limit=${limit}`),

@@ -11,24 +11,23 @@ type VehicleType struct {
 }
 
 type Station struct {
-	StationID              string         `json:"station_id"`
-	Name                   string         `json:"name"`
-	Lat                    float64        `json:"lat"`
-	Lon                    float64        `json:"lon"`
-	Capacity               int            `json:"capacity"`
-	VehicleTypeCapacity    map[string]int `json:"vehicle_type_capacity,omitempty"`
-	IsVirtualStation       bool           `json:"is_virtual_station"`
-	IsChargingStation      bool           `json:"is_charging_station"`
-	LastUpdated            time.Time      `json:"last_updated"`
-	// Live fields (from station_snapshots)
-	NumBikesAvailable *int `json:"num_bikes_available,omitempty"`
-	NumDocksAvailable *int `json:"num_docks_available,omitempty"`
+	StationID           string         `json:"station_id"`
+	Name                string         `json:"name"`
+	Lat                 float64        `json:"lat"`
+	Lon                 float64        `json:"lon"`
+	Capacity            int            `json:"capacity"`
+	VehicleTypeCapacity map[string]int `json:"vehicle_type_capacity,omitempty"`
+	IsVirtualStation    bool           `json:"is_virtual_station"`
+	IsChargingStation   bool           `json:"is_charging_station"`
+	LastUpdated         time.Time      `json:"last_updated"`
+	NumBikesAvailable   *int           `json:"num_bikes_available,omitempty"`
+	NumDocksAvailable   *int           `json:"num_docks_available,omitempty"`
 }
 
 type StationHistory struct {
-	Time               time.Time `json:"time"`
-	NumBikesAvailable  int       `json:"num_bikes_available"`
-	NumDocksAvailable  int       `json:"num_docks_available"`
+	Time              time.Time `json:"time"`
+	NumBikesAvailable int       `json:"num_bikes_available"`
+	NumDocksAvailable int       `json:"num_docks_available"`
 }
 
 type Bike struct {
@@ -39,26 +38,26 @@ type Bike struct {
 }
 
 type BikeSnapshot struct {
-	Time               time.Time  `json:"time"`
-	BikeID             string     `json:"bike_id"`
-	Lat                float64    `json:"lat"`
-	Lon                float64    `json:"lon"`
-	StationID          *string    `json:"station_id"`
-	IsReserved         bool       `json:"is_reserved"`
-	IsDisabled         bool       `json:"is_disabled"`
-	CurrentRangeMeters int        `json:"current_range_meters"`
+	Time               time.Time `json:"time"`
+	BikeID             string    `json:"bike_id"`
+	Lat                float64   `json:"lat"`
+	Lon                float64   `json:"lon"`
+	StationID          *string   `json:"station_id"`
+	IsReserved         bool      `json:"is_reserved"`
+	IsDisabled         bool      `json:"is_disabled"`
+	CurrentRangeMeters int       `json:"current_range_meters"`
 }
 
 type BikeLive struct {
-	BikeID             string   `json:"bike_id"`
-	VehicleTypeID      string   `json:"vehicle_type_id"`
-	Lat                float64  `json:"lat"`
-	Lon                float64  `json:"lon"`
-	StationID          *string  `json:"station_id"`
-	IsReserved         bool     `json:"is_reserved"`
-	IsDisabled         bool     `json:"is_disabled"`
-	CurrentRangeMeters int      `json:"current_range_meters"`
-	BatteryPct         int      `json:"battery_pct"`
+	BikeID             string  `json:"bike_id"`
+	VehicleTypeID      string  `json:"vehicle_type_id"`
+	Lat                float64 `json:"lat"`
+	Lon                float64 `json:"lon"`
+	StationID          *string `json:"station_id"`
+	IsReserved         bool    `json:"is_reserved"`
+	IsDisabled         bool    `json:"is_disabled"`
+	CurrentRangeMeters int     `json:"current_range_meters"`
+	BatteryPct         int     `json:"battery_pct"`
 }
 
 type BikeStats struct {
@@ -68,6 +67,18 @@ type BikeStats struct {
 	AvgBatteryPct   int     `json:"avg_battery_pct"`
 	AvailabilityPct float64 `json:"availability_pct"`
 	DisabledPct     float64 `json:"disabled_pct"`
+}
+
+type BikeHealth struct {
+	BikeID           string `json:"bike_id"`
+	HealthScore      int    `json:"health_score"`      // 0-100
+	BatteryScore     int    `json:"battery_score"`     // 0-40
+	ReliabilityScore int    `json:"reliability_score"` // 0-30
+	ActivityScore    int    `json:"activity_score"`    // 0-30
+	AvgBatteryPct    int    `json:"avg_battery_pct"`
+	DisabledCount30d int    `json:"disabled_count_30d"`
+	Trips30d         int    `json:"trips_30d"`
+	Label            string `json:"label"` // "Bon", "Moyen", "À réviser"
 }
 
 type Trip struct {
@@ -89,12 +100,12 @@ type Trip struct {
 }
 
 type FleetStats struct {
-	TotalBikes   int `json:"total_bikes"`
-	ActiveNow    int `json:"active_now"`
-	DisabledNow  int `json:"disabled_now"`
-	ReservedNow  int `json:"reserved_now"`
-	TripsToday   int `json:"trips_today"`
-	TripsWeek    int `json:"trips_week"`
+	TotalBikes  int `json:"total_bikes"`
+	ActiveNow   int `json:"active_now"`
+	DisabledNow int `json:"disabled_now"`
+	ReservedNow int `json:"reserved_now"`
+	TripsToday  int `json:"trips_today"`
+	TripsWeek   int `json:"trips_week"`
 }
 
 type DailyCount struct {
@@ -108,7 +119,53 @@ type BatteryBucket struct {
 }
 
 type BusiestStation struct {
-	StationID  string `json:"station_id"`
-	Name       string `json:"name"`
-	TripCount  int    `json:"trip_count"`
+	StationID string `json:"station_id"`
+	Name      string `json:"name"`
+	TripCount int    `json:"trip_count"`
+}
+
+type HeatPoint struct {
+	Lat    float64 `json:"lat"`
+	Lon    float64 `json:"lon"`
+	Weight float64 `json:"weight"`
+}
+
+type Anomaly struct {
+	BikeID        string    `json:"bike_id"`
+	VehicleTypeID string    `json:"vehicle_type_id"`
+	Lat           float64   `json:"lat"`
+	Lon           float64   `json:"lon"`
+	LastSeen      time.Time `json:"last_seen"`
+	HoursOutside  float64   `json:"hours_outside"`
+}
+
+type NearestBike struct {
+	BikeID             string  `json:"bike_id"`
+	VehicleTypeID      string  `json:"vehicle_type_id"`
+	Lat                float64 `json:"lat"`
+	Lon                float64 `json:"lon"`
+	CurrentRangeMeters int     `json:"current_range_meters"`
+	BatteryPct         int     `json:"battery_pct"`
+	DistanceMeters     int     `json:"distance_m"`
+}
+
+type NearestStation struct {
+	StationID         string  `json:"station_id"`
+	Name              string  `json:"name"`
+	Lat               float64 `json:"lat"`
+	Lon               float64 `json:"lon"`
+	NumDocksAvailable int     `json:"num_docks_available"`
+	DistanceMeters    int     `json:"distance_m"`
+}
+
+type ReplayBike struct {
+	BikeID    string  `json:"b"`
+	Lat       float64 `json:"la"`
+	Lon       float64 `json:"lo"`
+	StationID *string `json:"s,omitempty"`
+}
+
+type ReplayBucket struct {
+	Time      time.Time    `json:"time"`
+	Snapshots []ReplayBike `json:"snapshots"`
 }
