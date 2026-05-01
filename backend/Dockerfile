@@ -1,4 +1,5 @@
 FROM golang:1.22-alpine AS builder
+RUN apk add --no-cache git
 WORKDIR /app
 COPY . .
 RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /backend ./cmd/backend
