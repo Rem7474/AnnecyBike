@@ -1,9 +1,9 @@
-import { MapContainer, TileLayer, Marker, Popup, CircleMarker } from 'react-leaflet'
-import { Icon, DivIcon } from 'leaflet'
+import { useEffect, useRef } from 'react'
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import { Icon, DivIcon, type Map as LeafletMap } from 'leaflet'
 import type { BikeLive, Station } from '../../types'
 import { useNavigate } from 'react-router-dom'
 
-// Suppress default icon import issues
 delete (Icon.Default.prototype as any)._getIconUrl
 Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -32,6 +32,48 @@ function bikeIcon(bike: BikeLive) {
   return new DivIcon({ html, className: '', iconSize: [28, 28], iconAnchor: [14, 14] })
 }
 
+function stationIcon(avail: number, cap: number) {
+  const ratio = cap > 0 ? avail / cap : 0
+  const bg = ratio > 0.5 ? '#22c55e' : ratio > 0.2 ? '#f97316' : avail === 0 ? '#6b7280' : '#ef4444'
+  const html = `<div style="
+    width:36px;height:36px;border-radius:8px;
+    background:${bg};border:2px solid white;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    font-weight:bold;color:white;line-height:1.1;
+    box-shadow:0 2px 4px rgba(0,0,0,0.4)">
+    <span style="font-size:14px">${avail}</span>
+    <span style="font-size:8px;opacity:0.85">vélos</span>
+  </div>`
+  return new DivIcon({ html, className: '', iconSize: [36, 36], iconAnchor: [18, 18] })
+}
+
+// Bouton de géolocalisation injecté dans la carte Leaflet
+function GeolocateControl() {
+  const map = useMap()
+
+  const locate = () => {
+    map.locate({ setView: true, maxZoom: 16 })
+    map.once('locationerror', () => alert('Géolocalisation refusée ou indisponible.'))
+  }
+
+  return (
+    <div
+      onClick={locate}
+      title="Ma position"
+      style={{
+        position: 'absolute', bottom: 24, right: 12, zIndex: 1000,
+        width: 36, height: 36, borderRadius: 8,
+        background: 'white', border: '2px solid #cbd5e1',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.25)',
+        fontSize: 18,
+      }}
+    >
+      ⊕
+    </div>
+  )
+}
+
 interface Props {
   bikes: BikeLive[]
   stations: Station[]
@@ -43,33 +85,38 @@ export function LiveMap({ bikes, stations }: Props) {
   return (
     <MapContainer
       center={[45.899, 6.129]}
-      zoom={13}
-      style={{ flex: 1, width: '100%' }}
-      preferCanvas
+      zoom={14}
+      style={{ flex: 1, width: '100%', position: 'relative' }}
+      preferCanvas={false}
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
+      <GeolocateControl />
+
       {stations.map((st) => {
         const avail = st.num_bikes_available ?? 0
-        const cap = st.capacity || 1
-        const ratio = avail / cap
-        const color = ratio > 0.5 ? '#22c55e' : ratio > 0.2 ? '#f97316' : '#ef4444'
+        const cap = st.capacity ?? 1
         return (
-          <CircleMarker
+          <Marker
             key={st.station_id}
-            center={[st.lat, st.lon]}
-            radius={10}
-            pathOptions={{ color, fillColor: color, fillOpacity: 0.6, weight: 2 }}
+            position={[st.lat, st.lon]}
+            icon={stationIcon(avail, cap)}
             eventHandlers={{ click: () => navigate(`/stations/${st.station_id}`) }}
           >
             <Popup>
               <strong>{st.name}</strong><br />
-              {avail}/{cap} vélos disponibles
+              <span style={{ color: avail > 0 ? 'green' : 'gray' }}>
+                {avail} vélo{avail > 1 ? 's' : ''} disponible{avail > 1 ? 's' : ''}
+              </span>
+              <br />
+              {st.num_docks_available ?? '?'} dock{(st.num_docks_available ?? 0) > 1 ? 's' : ''} libre{(st.num_docks_available ?? 0) > 1 ? 's' : ''}
+              <br />
+              <small style={{ color: '#888' }}>Capacité totale : {cap}</small>
             </Popup>
-          </CircleMarker>
+          </Marker>
         )
       })}
 
