@@ -26,10 +26,17 @@ const BATTERY_COLORS = [
   '#eab308', '#22c55e', '#22c55e', '#22c55e', '#22c55e', '#22c55e',
 ]
 
-function fmtDate(iso: string) {
-  // YYYY-MM-DD → DD/MM
+function fmtDate(iso: unknown) {
+  if (typeof iso !== 'string' || iso.length < 10) return String(iso ?? '')
   const parts = iso.slice(0, 10).split('-')
   return `${parts[2]}/${parts[1]}`
+}
+
+const tooltipStyle = {
+  contentStyle: { background: '#0f172a', border: '1px solid #334155', borderRadius: 6, fontSize: 12 },
+  itemStyle: { color: '#f1f5f9' },
+  labelStyle: { color: '#94a3b8', marginBottom: 4 },
+  cursor: { fill: 'rgba(255,255,255,0.05)' },
 }
 
 export function StatsPage() {
@@ -74,17 +81,17 @@ export function StatsPage() {
         <div style={S.chart}>
           <div style={S.chartTitle}>Trajets par jour — 30 derniers jours</div>
           <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={tripsPerDay ?? []} margin={{ left: 0, right: 8, top: 4, bottom: 4 }}>
+            <BarChart data={tripsPerDay ?? []} margin={{ left: 0, right: 8, top: 4, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis
                 dataKey="date"
                 tick={{ fill: '#64748b', fontSize: 10 }}
                 tickFormatter={fmtDate}
-                interval={Math.ceil((tripsPerDay?.length ?? 30) / 8) - 1}
+                interval={4}
               />
               <YAxis tick={{ fill: '#64748b', fontSize: 11 }} width={32} allowDecimals={false} />
               <Tooltip
-                contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }}
+                {...tooltipStyle}
                 labelFormatter={fmtDate}
                 formatter={(v: number) => [v, 'Trajets']}
               />
@@ -112,8 +119,8 @@ export function StatsPage() {
                 ))}
               </Pie>
               <Tooltip
-                contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }}
-                formatter={(v: number, name: string) => [v + ' vélos', name]}
+                {...tooltipStyle}
+                formatter={(v: number, name: string) => [`${v} vélos`, name]}
               />
             </PieChart>
           </ResponsiveContainer>
