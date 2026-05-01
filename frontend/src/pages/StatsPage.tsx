@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  PieChart, Pie, Cell, Legend,
+  PieChart, Pie, Cell,
 } from 'recharts'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 
 const S: Record<string, React.CSSProperties> = {
@@ -25,7 +26,14 @@ const BATTERY_COLORS = [
   '#eab308', '#22c55e', '#22c55e', '#22c55e', '#22c55e', '#22c55e',
 ]
 
+function fmtDate(iso: string) {
+  // YYYY-MM-DD → DD/MM
+  const parts = iso.slice(0, 10).split('-')
+  return `${parts[2]}/${parts[1]}`
+}
+
 export function StatsPage() {
+  const navigate = useNavigate()
   const { data: fleet } = useQuery({ queryKey: ['stats-fleet'], queryFn: api.stats.fleet, refetchInterval: 60_000 })
   const { data: tripsPerDay } = useQuery({ queryKey: ['stats-trips-day'], queryFn: () => api.stats.tripsPerDay(30) })
   const { data: battery } = useQuery({ queryKey: ['stats-battery'], queryFn: api.stats.batteryDistribution, refetchInterval: 60_000 })
@@ -66,11 +74,20 @@ export function StatsPage() {
         <div style={S.chart}>
           <div style={S.chartTitle}>Trajets par jour — 30 derniers jours</div>
           <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={tripsPerDay ?? []}>
+            <BarChart data={tripsPerDay ?? []} margin={{ left: 0, right: 8, top: 4, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-              <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 10 }} interval="preserveStartEnd" />
-              <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
-              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155' }} />
+              <XAxis
+                dataKey="date"
+                tick={{ fill: '#64748b', fontSize: 10 }}
+                tickFormatter={fmtDate}
+                interval={Math.ceil((tripsPerDay?.length ?? 30) / 8) - 1}
+              />
+              <YAxis tick={{ fill: '#64748b', fontSize: 11 }} width={32} allowDecimals={false} />
+              <Tooltip
+                contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }}
+                labelFormatter={fmtDate}
+                formatter={(v: number) => [v, 'Trajets']}
+              />
               <Bar dataKey="count" fill="#38bdf8" radius={[3, 3, 0, 0]} name="Trajets" />
             </BarChart>
           </ResponsiveContainer>
@@ -85,15 +102,19 @@ export function StatsPage() {
                 dataKey="count"
                 nameKey="range"
                 cx="50%"
-                cy="50%"
-                outerRadius={80}
+                cy="45%"
+                outerRadius={72}
                 label={({ range, percent }) => `${range} (${(percent * 100).toFixed(0)}%)`}
+                labelLine={{ stroke: '#475569' }}
               >
                 {(battery ?? []).map((_, i) => (
                   <Cell key={i} fill={BATTERY_COLORS[i % BATTERY_COLORS.length]} />
                 ))}
               </Pie>
-              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155' }} />
+              <Tooltip
+                contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }}
+                formatter={(v: number, name: string) => [v + ' vélos', name]}
+              />
             </PieChart>
           </ResponsiveContainer>
         </div>
@@ -111,9 +132,15 @@ export function StatsPage() {
           </thead>
           <tbody>
             {(busiest ?? []).map((s, i) => (
-              <tr key={s.station_id}>
+              <tr
+                key={s.station_id}
+                onClick={() => navigate(`/stations/${s.station_id}`)}
+                style={{ cursor: 'pointer' }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = '#263348')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = '')}
+              >
                 <td style={S.td}>{i + 1}</td>
-                <td style={S.td}>{s.name}</td>
+                <td style={{ ...S.td, color: '#38bdf8' }}>{s.name}</td>
                 <td style={S.td}>{s.trip_count}</td>
               </tr>
             ))}
