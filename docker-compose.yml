@@ -1,0 +1,55 @@
+services:
+  db:
+    image: timescale/timescaledb-ha:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-annecybike}
+      POSTGRES_USER: ${POSTGRES_USER:-annecybike}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+    volumes:
+      - pgdata:/home/postgres/pgdata/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-annecybike} -d ${POSTGRES_DB:-annecybike}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  poller:
+    build: ./poller
+    environment:
+      DB_URL: postgres://${POSTGRES_USER:-annecybike}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-annecybike}
+      GBFS_BASE_URL: https://gbfs.partners.fifteen.eu/gbfs/2.2/annecy/en
+      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-60}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      DB_URL: postgres://${POSTGRES_USER:-annecybike}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-annecybike}
+      PORT: "8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  pgdata:
