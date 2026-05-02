@@ -233,7 +233,7 @@ export function BikeDetailPage() {
               <tr key={t.id}>
                 <td style={S.td}>{new Date(t.start_time).toLocaleString('fr-FR')}</td>
                 <td style={S.td}>{fmt(t.duration_minutes)} min</td>
-                <td style={S.td}>{t.distance_meters ? `${(t.distance_meters / 1000).toFixed(1)} km` : '—'}</td>
+                <td style={S.td}>{t.distance_meters != null ? `${(t.distance_meters / 1000).toFixed(1)} km` : '—'}</td>
                 <td style={S.td}>
                   {t.battery_delta !== undefined
                     ? `${t.battery_delta <= 0 ? '−' : '+'}${Math.round((Math.abs(t.battery_delta) / 45000) * 100)}%`

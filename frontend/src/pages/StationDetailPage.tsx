@@ -193,10 +193,10 @@ export function StationDetailPage() {
                   {new Date(t.start_time).toLocaleString('fr-FR')}
                 </td>
                 <td style={S.td}>
-                  {t.duration_minutes ? `${Math.round(t.duration_minutes)} min` : '—'}
+                  {t.duration_minutes != null ? `${Math.round(t.duration_minutes)} min` : '—'}
                 </td>
                 <td style={S.td}>
-                  {t.distance_meters ? `${(t.distance_meters / 1000).toFixed(1)} km` : '—'}
+                  {t.distance_meters != null ? `${(t.distance_meters / 1000).toFixed(1)} km` : '—'}
                 </td>
               </tr>
             ))}

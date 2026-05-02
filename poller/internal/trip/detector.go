@@ -146,11 +146,19 @@ func (d *Detector) gpsPathDistance(ctx context.Context, bikeID string, startTime
 	}
 
 	// Full path: departure coord → free-floating GPS points → arrival coord.
+	// Skip 0,0 endpoints: some GBFS providers omit lat/lon for docked bikes,
+	// which would produce wildly incorrect distances via null-island (Gulf of Guinea).
 	path := make([][2]float64, 0, len(pts)+2)
-	path = append(path, [2]float64{startLat, startLon})
+	if startLat != 0 || startLon != 0 {
+		path = append(path, [2]float64{startLat, startLon})
+	}
 	path = append(path, pts...)
-	path = append(path, [2]float64{endLat, endLon})
-
+	if endLat != 0 || endLon != 0 {
+		path = append(path, [2]float64{endLat, endLon})
+	}
+	if len(path) < 2 {
+		return 0
+	}
 	var total float64
 	for i := 1; i < len(path); i++ {
 		total += haversineRaw(path[i-1][0], path[i-1][1], path[i][0], path[i][1])

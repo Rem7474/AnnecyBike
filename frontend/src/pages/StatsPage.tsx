@@ -3,7 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell,
 } from 'recharts'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { api } from '../api'
 
 const S: Record<string, React.CSSProperties> = {
@@ -16,8 +16,8 @@ const S: Record<string, React.CSSProperties> = {
   charts: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 },
   chart: { background: '#1e293b', borderRadius: 8, padding: 16 },
   chartTitle: { fontSize: 14, fontWeight: 600, marginBottom: 12, color: '#94a3b8' },
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: 13 },
-  th: { textAlign: 'left', padding: '6px 10px', color: '#64748b', borderBottom: '1px solid #334155' },
+  table: { width: '100%', borderCollapse: 'collapse' as const, fontSize: 13 },
+  th: { textAlign: 'left' as const, padding: '6px 10px', color: '#64748b', borderBottom: '1px solid #334155' },
   td: { padding: '8px 10px', borderBottom: '1px solid #1e293b' },
 }
 
@@ -45,6 +45,11 @@ export function StatsPage() {
   const { data: tripsPerDay } = useQuery({ queryKey: ['stats-trips-day'], queryFn: () => api.stats.tripsPerDay(30) })
   const { data: battery } = useQuery({ queryKey: ['stats-battery'], queryFn: api.stats.batteryDistribution, refetchInterval: 60_000 })
   const { data: busiest } = useQuery({ queryKey: ['stats-busiest'], queryFn: () => api.stats.busiestStations(10) })
+  const { data: recentTrips } = useQuery({
+    queryKey: ['stats-recent-trips'],
+    queryFn: () => api.trips.list({ limit: 15 }),
+    refetchInterval: 60_000,
+  })
 
   return (
     <div style={S.page}>
@@ -127,32 +132,83 @@ export function StatsPage() {
         </div>
       </div>
 
-      <div style={{ ...S.chart, marginTop: 20 }}>
-        <div style={S.chartTitle}>Stations les plus actives (7 derniers jours)</div>
-        <table style={S.table}>
-          <thead>
-            <tr>
-              <th style={S.th}>#</th>
-              <th style={S.th}>Station</th>
-              <th style={S.th}>Trajets</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(busiest ?? []).map((s, i) => (
-              <tr
-                key={s.station_id}
-                onClick={() => navigate(`/stations/${s.station_id}`)}
-                style={{ cursor: 'pointer' }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = '#263348')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = '')}
-              >
-                <td style={S.td}>{i + 1}</td>
-                <td style={{ ...S.td, color: '#38bdf8' }}>{s.name}</td>
-                <td style={S.td}>{s.trip_count}</td>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 20 }}>
+        <div style={S.chart}>
+          <div style={S.chartTitle}>Stations les plus actives (7 derniers jours)</div>
+          <table style={S.table}>
+            <thead>
+              <tr>
+                <th style={S.th}>#</th>
+                <th style={S.th}>Station</th>
+                <th style={S.th}>Trajets</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(busiest ?? []).map((s, i) => (
+                <tr
+                  key={s.station_id}
+                  onClick={() => navigate(`/stations/${s.station_id}`)}
+                  style={{ cursor: 'pointer' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#263348')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = '')}
+                >
+                  <td style={S.td}>{i + 1}</td>
+                  <td style={{ ...S.td, color: '#38bdf8' }}>{s.name}</td>
+                  <td style={S.td}>{s.trip_count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={S.chart}>
+          <div style={S.chartTitle}>Derniers trajets effectués</div>
+          <table style={S.table}>
+            <thead>
+              <tr>
+                <th style={S.th}>Heure</th>
+                <th style={S.th}>Vélo</th>
+                <th style={S.th}>Trajet</th>
+                <th style={S.th}>Durée</th>
+                <th style={S.th}>Dist.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(recentTrips ?? []).length === 0 && (
+                <tr>
+                  <td colSpan={5} style={{ ...S.td, color: '#64748b' }}>Aucun trajet récent</td>
+                </tr>
+              )}
+              {(recentTrips ?? []).map((t) => (
+                <tr key={t.id}>
+                  <td style={{ ...S.td, color: '#64748b', fontSize: 11, whiteSpace: 'nowrap' }}>
+                    {new Date(t.start_time).toLocaleString('fr-FR', {
+                      day: '2-digit', month: '2-digit',
+                      hour: '2-digit', minute: '2-digit',
+                    })}
+                  </td>
+                  <td style={S.td}>
+                    <Link
+                      to={`/bikes/${t.bike_id}`}
+                      style={{ color: '#38bdf8', textDecoration: 'none', fontFamily: 'monospace', fontSize: 11 }}
+                    >
+                      {t.bike_id.slice(0, 8)}…
+                    </Link>
+                  </td>
+                  <td style={{ ...S.td, fontSize: 11, color: '#94a3b8' }}>
+                    {t.start_station_name ?? '?'} → {t.end_station_name ?? '?'}
+                  </td>
+                  <td style={{ ...S.td, whiteSpace: 'nowrap' }}>
+                    {t.duration_minutes != null ? `${Math.round(t.duration_minutes)} min` : '—'}
+                  </td>
+                  <td style={{ ...S.td, whiteSpace: 'nowrap' }}>
+                    {t.distance_meters != null ? `${(t.distance_meters / 1000).toFixed(1)} km` : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   )

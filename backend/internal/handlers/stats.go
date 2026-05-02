@@ -14,7 +14,12 @@ func GetFleetStats(pool *db.Pool) gin.HandlerFunc {
 		ctx := c.Request.Context()
 		var stats models.FleetStats
 
-		_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM bikes`).Scan(&stats.TotalBikes)
+		// Count only bikes seen in the last poll cycle — avoids counting retired bikes
+		// whose IDs are still in the bikes table from previous fleet rotations.
+		_ = pool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM bikes
+			WHERE last_seen > NOW() - INTERVAL '2 minutes'
+		`).Scan(&stats.TotalBikes)
 
 		_ = pool.QueryRow(ctx, `
 			SELECT
@@ -47,12 +52,15 @@ func GetTripsPerDay(pool *db.Pool) gin.HandlerFunc {
 			days = 365
 		}
 
+		// TO_CHAR ensures the date is returned as text "YYYY-MM-DD", which pgx
+		// scans cleanly into string without relying on implicit date codec behaviour.
 		rows, err := pool.Query(c.Request.Context(), `
-			SELECT DATE(start_time) AS date, COUNT(*) AS count
+			SELECT TO_CHAR(DATE(start_time AT TIME ZONE 'Europe/Paris'), 'YYYY-MM-DD') AS date,
+			       COUNT(*) AS count
 			FROM trips
-			WHERE start_time >= NOW() - ($1 || ' days')::INTERVAL
+			WHERE start_time >= NOW() - make_interval(days => $1)
 			GROUP BY 1 ORDER BY 1
-		`, strconv.Itoa(days))
+		`, days)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -131,8 +139,8 @@ func GetHeatmap(pool *db.Pool) gin.HandlerFunc {
 				       ROUND(start_lon::numeric, 4) AS lon,
 				       COUNT(*) AS weight
 				FROM trips
-				WHERE start_time > NOW() - ($1 || ' days')::INTERVAL
-				  AND start_lat IS NOT NULL
+				WHERE start_time > NOW() - make_interval(days => $1)
+				  AND start_lat IS NOT NULL AND start_lat != 0
 				GROUP BY 1, 2
 
 				UNION ALL
@@ -141,15 +149,15 @@ func GetHeatmap(pool *db.Pool) gin.HandlerFunc {
 				       ROUND(end_lon::numeric, 4),
 				       COUNT(*)
 				FROM trips
-				WHERE start_time > NOW() - ($1 || ' days')::INTERVAL
-				  AND end_lat IS NOT NULL
+				WHERE start_time > NOW() - make_interval(days => $1)
+				  AND end_lat IS NOT NULL AND end_lat != 0
 				  AND end_station_id IS NOT NULL
 				GROUP BY 1, 2
 			) combined
 			WHERE weight > 0
 			ORDER BY weight DESC
 			LIMIT 5000
-		`, strconv.Itoa(days))
+		`, days)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

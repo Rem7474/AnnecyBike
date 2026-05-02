@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -58,8 +59,9 @@ func GetTrips(pool *db.Pool) gin.HandlerFunc {
 
 		trips := make([]models.Trip, 0, limit)
 		for rows.Next() {
-			t := scanTrip(rows)
-			trips = append(trips, t)
+			if t, err := scanTrip(rows); err == nil {
+				trips = append(trips, t)
+			}
 		}
 		c.JSON(http.StatusOK, trips)
 	}
@@ -98,7 +100,9 @@ func GetBikeTrips(pool *db.Pool) gin.HandlerFunc {
 
 		trips := make([]models.Trip, 0, limit)
 		for rows.Next() {
-			trips = append(trips, scanTrip(rows))
+			if t, err := scanTrip(rows); err == nil {
+				trips = append(trips, t)
+			}
 		}
 		c.JSON(http.StatusOK, trips)
 	}
@@ -108,9 +112,9 @@ type scanner interface {
 	Scan(...any) error
 }
 
-func scanTrip(row scanner) models.Trip {
+func scanTrip(row scanner) (models.Trip, error) {
 	var t models.Trip
-	_ = row.Scan(
+	err := row.Scan(
 		&t.ID, &t.BikeID, &t.StartTime, &t.EndTime,
 		&t.StartStationID, &t.EndStationID,
 		&t.StartStationName, &t.EndStationName,
@@ -118,5 +122,8 @@ func scanTrip(row scanner) models.Trip {
 		&t.DistanceMeters, &t.BatteryStart, &t.BatteryEnd, &t.BatteryDelta,
 		&t.DurationMinutes,
 	)
-	return t
+	if err != nil {
+		slog.Error("scan trip failed", "err", err)
+	}
+	return t, err
 }
