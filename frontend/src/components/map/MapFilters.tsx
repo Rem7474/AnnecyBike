@@ -15,14 +15,50 @@ const S: React.CSSProperties = {
 
 const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8 }
 const label: React.CSSProperties = { flex: 1, userSelect: 'none' }
+const divider: React.CSSProperties = { borderTop: '1px solid #334155', paddingTop: 8 }
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ fontWeight: 600, color: '#94a3b8', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>
+      {children}
+    </div>
+  )
+}
 
 export function MapFiltersPanel({ filters, onChange }: Props) {
   const set = (patch: Partial<MapFilters>) => onChange({ ...filters, ...patch })
 
   return (
     <div style={S}>
-      <div style={{ fontWeight: 600, marginBottom: 2, color: '#94a3b8', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>
-        Filtres
+      <SectionLabel>Afficher</SectionLabel>
+
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button
+          onClick={() => set({ showBikes: !filters.showBikes })}
+          style={{
+            flex: 1, padding: '5px 0', borderRadius: 6, fontSize: 12, cursor: 'pointer', border: 'none',
+            background: filters.showBikes ? '#38bdf8' : '#1e293b',
+            color: filters.showBikes ? '#0f172a' : '#64748b',
+            fontWeight: filters.showBikes ? 700 : 400,
+          }}
+        >
+          Vélos
+        </button>
+        <button
+          onClick={() => set({ showStations: !filters.showStations })}
+          style={{
+            flex: 1, padding: '5px 0', borderRadius: 6, fontSize: 12, cursor: 'pointer', border: 'none',
+            background: filters.showStations ? '#22c55e' : '#1e293b',
+            color: filters.showStations ? '#0f172a' : '#64748b',
+            fontWeight: filters.showStations ? 700 : 400,
+          }}
+        >
+          Stations
+        </button>
+      </div>
+
+      <div style={divider}>
+        <SectionLabel>Vélos</SectionLabel>
       </div>
 
       <div>
@@ -33,34 +69,35 @@ export function MapFiltersPanel({ filters, onChange }: Props) {
         <input
           type="range" min={0} max={100} step={5}
           value={filters.minBattery}
+          disabled={!filters.showBikes}
           onChange={(e) => set({ minBattery: +e.target.value })}
-          style={{ width: '100%', accentColor: '#38bdf8' }}
+          style={{ width: '100%', accentColor: '#38bdf8', opacity: filters.showBikes ? 1 : 0.3 }}
         />
       </div>
 
-      <label style={row}>
-        <input type="checkbox" checked={filters.showElectric}
+      <label style={{ ...row, opacity: filters.showBikes ? 1 : 0.3 }}>
+        <input type="checkbox" checked={filters.showElectric} disabled={!filters.showBikes}
           onChange={(e) => set({ showElectric: e.target.checked })} />
-        <span style={label}>⚡ Vélos électriques</span>
+        <span style={label}>Électriques</span>
       </label>
 
-      <label style={row}>
-        <input type="checkbox" checked={filters.showManual}
+      <label style={{ ...row, opacity: filters.showBikes ? 1 : 0.3 }}>
+        <input type="checkbox" checked={filters.showManual} disabled={!filters.showBikes}
           onChange={(e) => set({ showManual: e.target.checked })} />
-        <span style={label}>🚲 Vélos mécaniques</span>
+        <span style={label}>Mécaniques</span>
       </label>
 
-      <label style={row}>
-        <input type="checkbox" checked={!filters.hideDisabled}
+      <label style={{ ...row, opacity: filters.showBikes ? 1 : 0.3 }}>
+        <input type="checkbox" checked={!filters.hideDisabled} disabled={!filters.showBikes}
           onChange={(e) => set({ hideDisabled: !e.target.checked })} />
-        <span style={label}>🔴 Hors service</span>
+        <span style={label}>Hors service</span>
       </label>
 
-      <div style={{ borderTop: '1px solid #334155', paddingTop: 8 }}>
+      <div style={divider}>
         <label style={row}>
           <input type="checkbox" checked={filters.showHeatmap}
             onChange={(e) => set({ showHeatmap: e.target.checked })} />
-          <span style={label}>🔥 Heatmap trajets</span>
+          <span style={label}>Heatmap trajets</span>
         </label>
       </div>
     </div>

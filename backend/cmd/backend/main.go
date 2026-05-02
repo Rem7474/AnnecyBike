@@ -68,6 +68,7 @@ func main() {
 		v1.GET("/stations/live", handlers.GetStationsLive(pool))
 		v1.GET("/stations/nearest", handlers.GetNearestStations(pool))
 		v1.GET("/stations/:id", handlers.GetStation(pool))
+		v1.GET("/stations/:id/bikes", handlers.GetStationBikes(pool))
 		v1.GET("/stations/:id/history", handlers.GetStationHistory(pool))
 
 		v1.GET("/trips", handlers.GetTrips(pool))

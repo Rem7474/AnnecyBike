@@ -115,6 +115,14 @@ export interface BusiestStation {
   trip_count: number
 }
 
+export interface StationBike {
+  bike_id: string
+  vehicle_type_id: string
+  battery_pct: number
+  health_score: number
+  health_label: string
+}
+
 export interface HeatPoint {
   lat: number
   lon: number

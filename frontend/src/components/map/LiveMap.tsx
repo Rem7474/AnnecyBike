@@ -112,7 +112,7 @@ function MapContent({ bikes, stations, filters, heatPoints, showReplay, onCloseR
     <>
       {filters.showHeatmap && <HeatmapLayer points={heatPoints} />}
 
-      {stations.map((st) => {
+      {filters.showStations && stations.map((st) => {
         const avail = st.num_bikes_available ?? 0
         const cap = st.capacity ?? 1
         return (
@@ -134,7 +134,7 @@ function MapContent({ bikes, stations, filters, heatPoints, showReplay, onCloseR
         )
       })}
 
-      {!showReplay && filteredBikes.map((bike) => (
+      {filters.showBikes && !showReplay && filteredBikes.map((bike) => (
         <Marker
           key={bike.bike_id}
           position={[bike.lat, bike.lon]}
@@ -163,6 +163,8 @@ interface Props {
 }
 
 const DEFAULT_FILTERS: MapFilters = {
+  showBikes: true,
+  showStations: true,
   minBattery: 0,
   showElectric: true,
   showManual: true,

@@ -126,6 +126,14 @@ type BusiestStation struct {
 	TripCount int    `json:"trip_count"`
 }
 
+type StationBike struct {
+	BikeID        string `json:"bike_id"`
+	VehicleTypeID string `json:"vehicle_type_id"`
+	BatteryPct    int    `json:"battery_pct"`
+	HealthScore   int    `json:"health_score"`
+	HealthLabel   string `json:"health_label"`
+}
+
 type HeatPoint struct {
 	Lat    float64 `json:"lat"`
 	Lon    float64 `json:"lon"`

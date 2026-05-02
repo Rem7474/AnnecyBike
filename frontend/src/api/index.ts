@@ -1,7 +1,7 @@
 import type {
   Anomaly, Bike, BikeLive, BikeHealth, BikeSnapshot, BikeStats,
   BusiestStation, BatteryBucket, DailyCount, FleetStats,
-  HeatPoint, NearestBike, NearestStation, ReplayBucket, Station, Trip,
+  HeatPoint, NearestBike, NearestStation, ReplayBucket, Station, StationBike, Trip,
 } from '../types'
 
 const BASE = '/api/v1'
@@ -33,6 +33,7 @@ export const api = {
   stations: {
     live: () => get<Station[]>(`${BASE}/stations/live`),
     get: (id: string) => get<Station>(`${BASE}/stations/${id}`),
+    bikes: (id: string) => get<StationBike[]>(`${BASE}/stations/${id}/bikes`),
     history: (id: string, from?: string, to?: string) => {
       const p = new URLSearchParams()
       if (from) p.set('from', from)
