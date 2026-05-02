@@ -74,7 +74,7 @@ export interface Trip {
   id: number
   bike_id: string
   start_time: string
-  end_time?: string
+  end_time: string
   start_station_id?: string
   end_station_id?: string
   start_station_name?: string
@@ -92,7 +92,7 @@ export interface Trip {
 
 export interface FleetStats {
   total_bikes: number
-  active_now: number
+  available_now: number
   disabled_now: number
   reserved_now: number
   trips_today: number
@@ -168,6 +168,8 @@ export interface WSMessage {
 }
 
 export interface MapFilters {
+  showBikes: boolean
+  showStations: boolean
   minBattery: number
   showElectric: boolean
   showManual: boolean

@@ -73,6 +73,7 @@ func GetBikeTrips(pool *db.Pool) gin.HandlerFunc {
 		if limit > 200 {
 			limit = 200
 		}
+		from, to := parseTimeRange(c, 90*24*time.Hour)
 
 		rows, err := pool.Query(c.Request.Context(), `
 			SELECT t.id, t.bike_id, t.start_time, t.end_time,
@@ -85,9 +86,10 @@ func GetBikeTrips(pool *db.Pool) gin.HandlerFunc {
 			LEFT JOIN stations ss ON ss.station_id = t.start_station_id
 			LEFT JOIN stations es ON es.station_id = t.end_station_id
 			WHERE t.bike_id = $1
+			  AND t.start_time BETWEEN $2 AND $3
 			ORDER BY t.start_time DESC
-			LIMIT $2 OFFSET $3
-		`, bikeID, limit, offset)
+			LIMIT $4 OFFSET $5
+		`, bikeID, from, to, limit, offset)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

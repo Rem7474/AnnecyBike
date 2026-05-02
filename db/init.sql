@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS trips (
     id               BIGSERIAL PRIMARY KEY,
     bike_id          TEXT             NOT NULL,
     start_time       TIMESTAMPTZ      NOT NULL,
-    end_time         TIMESTAMPTZ,
+    end_time         TIMESTAMPTZ      NOT NULL,
     start_station_id TEXT,
     end_station_id   TEXT,
     start_lat        DOUBLE PRECISION,
@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS trips (
 );
 
 CREATE INDEX IF NOT EXISTS idx_trips_bike_start ON trips (bike_id, start_time DESC);
+CREATE INDEX IF NOT EXISTS idx_trips_start_time ON trips (start_time DESC);
 CREATE INDEX IF NOT EXISTS idx_trips_start_station ON trips (start_station_id) WHERE start_station_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_trips_end_station ON trips (end_station_id) WHERE end_station_id IS NOT NULL;
 

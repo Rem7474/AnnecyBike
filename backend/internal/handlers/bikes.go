@@ -167,7 +167,7 @@ func GetBikeStats(pool *db.Pool) gin.HandlerFunc {
 
 		_ = pool.QueryRow(ctx, `
 			SELECT COUNT(*), COALESCE(SUM(distance_meters), 0) / 1000.0
-			FROM trips WHERE bike_id = $1 AND end_time IS NOT NULL
+			FROM trips WHERE bike_id = $1
 		`, bikeID).Scan(&stats.TotalTrips, &stats.TotalDistanceKm)
 
 		var avgRange *float64
@@ -227,7 +227,6 @@ func GetBikeHealth(pool *db.Pool) gin.HandlerFunc {
 			SELECT COUNT(*) FROM trips
 			WHERE bike_id = $1
 			  AND start_time > NOW() - INTERVAL '30 days'
-			  AND end_time IS NOT NULL
 		`, bikeID).Scan(&h.Trips30d)
 
 		// Score calculation

@@ -20,11 +20,11 @@ type BikeState struct {
 }
 
 type openTrip struct {
-	startTime       time.Time
-	startStationID  *string
-	startLat        float64
-	startLon        float64
-	batteryStart    int
+	startTime      time.Time
+	startStationID *string
+	startLat       float64
+	startLon       float64
+	batteryStart   int
 }
 
 // Detector maintains per-bike state across poll cycles and derives trips.
@@ -42,14 +42,33 @@ func NewDetector(pool *db.Pool) *Detector {
 	}
 }
 
+// HydrateState loads the most recent known state per bike from the DB so that
+// trip detection survives a poller restart without losing in-flight trips.
+func (d *Detector) HydrateState(ctx context.Context) error {
+	rows, err := d.db.FetchLatestBikeStates(ctx)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		d.lastState[row.BikeID] = BikeState{
+			StationID:  row.StationID,
+			Lat:        row.Lat,
+			Lon:        row.Lon,
+			Battery:    row.RangeMeters,
+			IsDisabled: row.IsDisabled,
+			SeenAt:     row.SeenAt,
+		}
+	}
+	slog.Info("detector state hydrated", "bikes", len(rows))
+	return nil
+}
+
 // Process compares the current poll snapshot against the previous one
 // and detects trip starts/ends.
 func (d *Detector) Process(ctx context.Context, now time.Time, current map[string]BikeState) {
-	// Detect departures and arrivals
 	for bikeID, cur := range current {
 		prev, seen := d.lastState[bikeID]
 		if !seen {
-			// New bike: register state, no trip action
 			d.lastState[bikeID] = cur
 			continue
 		}
@@ -58,61 +77,85 @@ func (d *Detector) Process(ctx context.Context, now time.Time, current map[strin
 		curDocked := cur.StationID != nil
 
 		switch {
-		case prevDocked && !curDocked && !cur.IsDisabled:
-			// Departure: was at station, now free
-			sid := prev.StationID
+		case prevDocked && !curDocked:
+			// Departure: was at station, now free-floating.
+			// Note: IsDisabled is intentionally not filtered — a bike can be marked
+			// disabled mid-rental (low battery, ops flag) and still needs trip tracking.
 			d.openTrips[bikeID] = openTrip{
 				startTime:      now,
-				startStationID: sid,
+				startStationID: prev.StationID,
 				startLat:       prev.Lat,
 				startLon:       prev.Lon,
 				batteryStart:   prev.Battery,
 			}
-			slog.Info("trip started", "bike", bikeID, "from_station", stationStr(sid))
+			slog.Info("trip started", "bike", bikeID, "from_station", stationStr(prev.StationID))
 
 		case !prevDocked && curDocked:
-			// Arrival: was free, now at station
+			// Arrival: was free-floating, now at station.
 			if ot, ok := d.openTrips[bikeID]; ok {
 				d.closeTrip(ctx, bikeID, ot, now, cur)
 				delete(d.openTrips, bikeID)
 			}
+
+		case prevDocked && curDocked && !sameStation(prev.StationID, cur.StationID):
+			// Bike moved from one station to another within a single poll window
+			// (short trip not captured as free-floating). Use poll boundaries as
+			// the best available time estimate.
+			ot := openTrip{
+				startTime:      prev.SeenAt,
+				startStationID: prev.StationID,
+				startLat:       prev.Lat,
+				startLon:       prev.Lon,
+				batteryStart:   prev.Battery,
+			}
+			d.closeTrip(ctx, bikeID, ot, now, cur)
 		}
 
 		d.lastState[bikeID] = cur
 	}
 
-	// Handle bikes that disappeared from the feed
+	// Handle bikes that disappeared from the feed.
 	for bikeID, prev := range d.lastState {
 		if _, stillPresent := current[bikeID]; stillPresent {
 			continue
 		}
 		if ot, ok := d.openTrips[bikeID]; ok {
-			// Bike gone with an open trip for > 10 min → close it
 			if now.Sub(ot.startTime) > 10*time.Minute {
 				d.closeTrip(ctx, bikeID, ot, now, prev)
 				delete(d.openTrips, bikeID)
 			}
 		}
-		// Remove from last state if gone for a while
 		if now.Sub(prev.SeenAt) > 15*time.Minute {
+			// Safety: close any leaked open trip before discarding state.
+			if ot, ok := d.openTrips[bikeID]; ok {
+				d.closeTrip(ctx, bikeID, ot, prev.SeenAt, prev)
+				delete(d.openTrips, bikeID)
+			}
 			delete(d.lastState, bikeID)
 		}
 	}
 }
 
-// gpsPathDistance sums haversine distances between consecutive free-floating
-// snapshots recorded during the trip. Falls back to point-to-point haversine
-// when fewer than 2 GPS points exist (e.g. very short trips).
+// gpsPathDistance computes the total estimated cycling distance by walking the
+// recorded GPS path: departure station → free-floating snapshots → arrival station.
+// A 1.3 detour factor is applied uniformly to account for road curvature.
 func (d *Detector) gpsPathDistance(ctx context.Context, bikeID string, startTime, endTime time.Time, startLat, startLon, endLat, endLon float64) int {
 	pts, err := d.db.FetchBikePathPoints(ctx, bikeID, startTime, endTime)
-	if err != nil || len(pts) < 2 {
-		return haversine(startLat, startLon, endLat, endLon)
+	if err != nil {
+		pts = nil
 	}
+
+	// Full path: departure coord → free-floating GPS points → arrival coord.
+	path := make([][2]float64, 0, len(pts)+2)
+	path = append(path, [2]float64{startLat, startLon})
+	path = append(path, pts...)
+	path = append(path, [2]float64{endLat, endLon})
+
 	var total float64
-	for i := 1; i < len(pts); i++ {
-		total += haversineRaw(pts[i-1][0], pts[i-1][1], pts[i][0], pts[i][1])
+	for i := 1; i < len(path); i++ {
+		total += haversineRaw(path[i-1][0], path[i-1][1], path[i][0], path[i][1])
 	}
-	return int(total)
+	return int(total * 1.3)
 }
 
 func (d *Detector) closeTrip(ctx context.Context, bikeID string, ot openTrip, endTime time.Time, endState BikeState) {
@@ -147,9 +190,11 @@ func haversineRaw(lat1, lon1, lat2, lon2 float64) float64 {
 	return R * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 }
 
-// haversine returns straight-line distance × 1.3 as fallback when GPS path is unavailable.
-func haversine(lat1, lon1, lat2, lon2 float64) int {
-	return int(haversineRaw(lat1, lon1, lat2, lon2) * 1.3)
+func sameStation(a, b *string) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
 }
 
 func stationStr(s *string) string {

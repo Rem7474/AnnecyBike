@@ -57,7 +57,7 @@ export function StatsPage() {
         </div>
         <div style={S.card}>
           <div style={S.cardLabel}>Disponibles</div>
-          <div style={{ ...S.cardValue, color: '#22c55e' }}>{fleet?.active_now ?? '—'}</div>
+          <div style={{ ...S.cardValue, color: '#22c55e' }}>{fleet?.available_now ?? '—'}</div>
         </div>
         <div style={S.card}>
           <div style={S.cardLabel}>Hors service</div>

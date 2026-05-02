@@ -150,6 +150,41 @@ func (p *Pool) InsertTrip(ctx context.Context,
 	return err
 }
 
+// BikeStateRow holds the latest snapshot data for a single bike, used to
+// hydrate the trip detector after a restart.
+type BikeStateRow struct {
+	BikeID      string
+	Lat         float64
+	Lon         float64
+	StationID   *string
+	IsDisabled  bool
+	RangeMeters int
+	SeenAt      time.Time
+}
+
+// FetchLatestBikeStates returns the most recent snapshot per bike.
+func (p *Pool) FetchLatestBikeStates(ctx context.Context) ([]BikeStateRow, error) {
+	rows, err := p.Pool.Query(ctx, `
+		SELECT DISTINCT ON (bike_id)
+			bike_id, lat, lon, station_id, is_disabled, current_range_meters, time
+		FROM bike_snapshots
+		ORDER BY bike_id, time DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []BikeStateRow
+	for rows.Next() {
+		var r BikeStateRow
+		if err := rows.Scan(&r.BikeID, &r.Lat, &r.Lon, &r.StationID, &r.IsDisabled, &r.RangeMeters, &r.SeenAt); err == nil {
+			result = append(result, r)
+		}
+	}
+	return result, rows.Err()
+}
+
 // FetchBikePathPoints returns ordered (lat, lon) pairs for free-floating snapshots
 // of a given bike between from and to, used for GPS-path distance calculation.
 func (p *Pool) FetchBikePathPoints(ctx context.Context, bikeID string, from, to time.Time) ([][2]float64, error) {

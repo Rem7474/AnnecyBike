@@ -50,6 +50,10 @@ func main() {
 	client := gbfs.NewClient(cfg.GBFSBaseURL)
 	detector := trip.NewDetector(pool)
 
+	if err := detector.HydrateState(ctx); err != nil {
+		slog.Warn("could not hydrate detector state from DB", "err", err)
+	}
+
 	slog.Info("poller started", "interval", cfg.PollInterval)
 
 	// Run immediately on startup, then on ticker

@@ -64,22 +64,33 @@ export function BikeDetailPage() {
     battery: Math.round((s.current_range_meters / 45000) * 100),
   })).reverse()
 
-  // Build trajectory polyline: segments separated when bike returns to a station
-  const trajectoryPoints = (trajectory ?? [])
-    .filter((s) => s.station_id === null)
-    .map((s) => [s.lat, s.lon] as [number, number])
-    .reverse()
+  // Build trajectory polyline segments: each continuous free-floating period
+  // becomes its own segment, so we don't draw phantom lines between separate trips.
+  const trajectorySegments: [number, number][][] = []
+  {
+    let seg: [number, number][] = []
+    // trajectory arrives newest-first; reverse to walk chronologically
+    for (const s of (trajectory ?? []).slice().reverse()) {
+      if (s.station_id === null) {
+        seg.push([s.lat, s.lon])
+      } else {
+        if (seg.length > 1) trajectorySegments.push(seg)
+        seg = []
+      }
+    }
+    if (seg.length > 1) trajectorySegments.push(seg)
+  }
 
   const tripLines = (trips ?? [])
-    .filter((t) => t.end_lat && t.end_lon && t.start_lat && t.start_lon)
+    .filter((t) => t.start_lat !== 0 && t.start_lon !== 0 && t.end_lat !== 0 && t.end_lon !== 0)
     .map((t) => ({
       id: t.id,
       path: [[t.start_lat, t.start_lon], [t.end_lat, t.end_lon]] as [number, number][],
       battery: t.battery_delta,
     }))
 
-  const mapCenter: [number, number] = trajectoryPoints[0]
-    ?? (tripLines[0]?.path[0])
+  const mapCenter: [number, number] = trajectorySegments[0]?.[0]
+    ?? tripLines[0]?.path[0]
     ?? [45.899, 6.129]
 
   return (
@@ -177,10 +188,10 @@ export function BikeDetailPage() {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution=""
               />
-              {/* Free-floating path */}
-              {trajectoryPoints.length > 1 && (
-                <Polyline positions={trajectoryPoints} pathOptions={{ color: '#38bdf8', weight: 2 }} />
-              )}
+              {/* Free-floating path — one Polyline per continuous segment */}
+              {trajectorySegments.map((seg, i) => (
+                <Polyline key={i} positions={seg} pathOptions={{ color: '#38bdf8', weight: 2 }} />
+              ))}
               {/* Trip start/end lines */}
               {tripLines.map((t) => (
                 <Polyline
@@ -225,7 +236,7 @@ export function BikeDetailPage() {
                 <td style={S.td}>{t.distance_meters ? `${(t.distance_meters / 1000).toFixed(1)} km` : '—'}</td>
                 <td style={S.td}>
                   {t.battery_delta !== undefined
-                    ? `−${Math.round((Math.abs(t.battery_delta) / 45000) * 100)}%`
+                    ? `${t.battery_delta <= 0 ? '−' : '+'}${Math.round((Math.abs(t.battery_delta) / 45000) * 100)}%`
                     : '—'}
                 </td>
                 <td style={{ ...S.td, fontSize: 11, color: '#64748b' }}>

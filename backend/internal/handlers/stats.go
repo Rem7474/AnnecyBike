@@ -27,13 +27,13 @@ func GetFleetStats(pool *db.Pool) gin.HandlerFunc {
 				WHERE time > NOW() - INTERVAL '2 minutes'
 				ORDER BY bike_id, time DESC
 			) latest
-		`).Scan(&stats.ActiveNow, &stats.DisabledNow, &stats.ReservedNow)
+		`).Scan(&stats.AvailableNow, &stats.DisabledNow, &stats.ReservedNow)
 
 		_ = pool.QueryRow(ctx, `
 			SELECT
 				COUNT(*) FILTER (WHERE start_time >= CURRENT_DATE),
 				COUNT(*) FILTER (WHERE start_time >= NOW() - INTERVAL '7 days')
-			FROM trips WHERE end_time IS NOT NULL
+			FROM trips
 		`).Scan(&stats.TripsToday, &stats.TripsWeek)
 
 		c.JSON(http.StatusOK, stats)
@@ -51,7 +51,6 @@ func GetTripsPerDay(pool *db.Pool) gin.HandlerFunc {
 			SELECT DATE(start_time) AS date, COUNT(*) AS count
 			FROM trips
 			WHERE start_time >= NOW() - ($1 || ' days')::INTERVAL
-				AND end_time IS NOT NULL
 			GROUP BY 1 ORDER BY 1
 		`, strconv.Itoa(days))
 		if err != nil {
@@ -181,7 +180,6 @@ func GetBusiestStations(pool *db.Pool) gin.HandlerFunc {
 			FROM stations s
 			LEFT JOIN trips t ON (t.start_station_id = s.station_id OR t.end_station_id = s.station_id)
 				AND t.start_time >= NOW() - INTERVAL '7 days'
-				AND t.end_time IS NOT NULL
 			GROUP BY s.station_id, s.name
 			ORDER BY trip_count DESC
 			LIMIT $1
