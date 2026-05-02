@@ -115,26 +115,23 @@ func (d *Detector) Process(ctx context.Context, now time.Time, current map[strin
 	}
 
 	// Handle bikes that disappeared from the feed.
+	// Keep state alive for up to 2 hours so the teleport case can fire when the
+	// bike returns (covers rentals where the provider removes the bike from the
+	// GBFS feed while it is in use). A single threshold avoids the previous
+	// two-tier bug where the 15-min cleanup deleted state before the 30-min
+	// trip-close could ever run.
 	for bikeID, prev := range d.lastState {
 		if _, stillPresent := current[bikeID]; stillPresent {
 			continue
 		}
+		if now.Sub(prev.SeenAt) <= 2*time.Hour {
+			continue
+		}
 		if ot, ok := d.openTrips[bikeID]; ok {
-			// Close only when the bike has been absent for >10 min, not based on
-			// trip duration — a long ride with a brief GBFS blip must not be cut short.
-			if now.Sub(prev.SeenAt) > 30*time.Minute {
-				d.closeTrip(ctx, bikeID, ot, now, prev)
-				delete(d.openTrips, bikeID)
-			}
+			d.closeTrip(ctx, bikeID, ot, prev.SeenAt, prev)
+			delete(d.openTrips, bikeID)
 		}
-		if now.Sub(prev.SeenAt) > 15*time.Minute {
-			// Safety: close any leaked open trip before discarding state.
-			if ot, ok := d.openTrips[bikeID]; ok {
-				d.closeTrip(ctx, bikeID, ot, prev.SeenAt, prev)
-				delete(d.openTrips, bikeID)
-			}
-			delete(d.lastState, bikeID)
-		}
+		delete(d.lastState, bikeID)
 	}
 }
 
@@ -172,15 +169,26 @@ func (d *Detector) gpsPathDistance(ctx context.Context, bikeID string, startTime
 // blip rather than a real ride. Two patterns observed in the wild:
 //  1. Bike blinks off a charging station and reappears at the same station within
 //     10 min while the battery went up (or stayed equal) → charging artefact.
-//  2. Any "trip" shorter than 3 min with under 150 m displacement → noise.
+//  2. Very short movement with no clear station-to-station transition → GBFS noise.
+//     This condition is intentionally NOT applied when start and end are two
+//     distinct known stations: the teleport case (bike skipped the free-floating
+//     phase) always produces a short computed duration (one poll boundary) and
+//     possibly zero distance when the provider omits coordinates for docked bikes.
+//     Filtering those would silently discard real trips.
 func isGhostTrip(startSID, endSID *string, battStart, battEnd, dist int, duration time.Duration) bool {
 	if sameStation(startSID, endSID) && battEnd >= battStart && duration < 10*time.Minute {
 		return true
 	}
-	if dist < 150 && duration < 3*time.Minute {
+	if dist < 150 && duration < 3*time.Minute && !differentStations(startSID, endSID) {
 		return true
 	}
 	return false
+}
+
+// differentStations returns true only when both IDs are non-nil and unequal —
+// i.e., the bike provably moved between two distinct known stations.
+func differentStations(a, b *string) bool {
+	return a != nil && b != nil && *a != *b
 }
 
 func (d *Detector) closeTrip(ctx context.Context, bikeID string, ot openTrip, endTime time.Time, endState BikeState) {

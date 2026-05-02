@@ -162,12 +162,15 @@ type BikeStateRow struct {
 	SeenAt      time.Time
 }
 
-// FetchLatestBikeStates returns the most recent snapshot per bike.
+// FetchLatestBikeStates returns the most recent snapshot per bike for bikes
+// seen within the last 2 hours. The 2-hour window matches the runtime state
+// cleanup threshold so that hydrated state and in-memory state stay consistent.
 func (p *Pool) FetchLatestBikeStates(ctx context.Context) ([]BikeStateRow, error) {
 	rows, err := p.Pool.Query(ctx, `
 		SELECT DISTINCT ON (bike_id)
 			bike_id, lat, lon, station_id, is_disabled, current_range_meters, time
 		FROM bike_snapshots
+		WHERE time > NOW() - INTERVAL '2 hours'
 		ORDER BY bike_id, time DESC
 	`)
 	if err != nil {
