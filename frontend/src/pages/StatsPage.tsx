@@ -196,7 +196,7 @@ export function StatsPage() {
                     </Link>
                   </td>
                   <td style={{ ...S.td, fontSize: 11, color: '#94a3b8' }}>
-                    {t.start_station_name ?? '?'} → {t.end_station_name ?? '?'}
+                    {t.start_station_name ?? '—'} → {t.end_station_name ?? 'Libre'}
                   </td>
                   <td style={{ ...S.td, whiteSpace: 'nowrap' }}>
                     {t.duration_minutes != null ? `${Math.round(t.duration_minutes)} min` : '—'}

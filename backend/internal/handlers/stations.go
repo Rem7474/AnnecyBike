@@ -122,6 +122,11 @@ func GetStationBikes(pool *db.Pool) gin.HandlerFunc {
 				FROM trips t
 				JOIN current c ON c.bike_id = t.bike_id
 				WHERE t.start_time > NOW() - INTERVAL '30 days'
+				  AND NOT (
+				    t.start_station_id IS NOT DISTINCT FROM t.end_station_id
+				    AND t.end_time - t.start_time < INTERVAL '10 minutes'
+				    AND COALESCE(t.distance_meters, 0) < 200
+				  )
 				GROUP BY t.bike_id
 			)
 			SELECT

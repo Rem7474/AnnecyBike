@@ -34,6 +34,11 @@ func GetTrips(pool *db.Pool) gin.HandlerFunc {
 			LEFT JOIN stations ss ON ss.station_id = t.start_station_id
 			LEFT JOIN stations es ON es.station_id = t.end_station_id
 			WHERE t.start_time BETWEEN $1 AND $2
+			  AND NOT (
+			    t.start_station_id IS NOT DISTINCT FROM t.end_station_id
+			    AND t.end_time - t.start_time < INTERVAL '10 minutes'
+			    AND COALESCE(t.distance_meters, 0) < 200
+			  )
 		`
 		args := []any{from, to}
 		argIdx := 3
@@ -89,6 +94,11 @@ func GetBikeTrips(pool *db.Pool) gin.HandlerFunc {
 			LEFT JOIN stations es ON es.station_id = t.end_station_id
 			WHERE t.bike_id = $1
 			  AND t.start_time BETWEEN $2 AND $3
+			  AND NOT (
+			    t.start_station_id IS NOT DISTINCT FROM t.end_station_id
+			    AND t.end_time - t.start_time < INTERVAL '10 minutes'
+			    AND COALESCE(t.distance_meters, 0) < 200
+			  )
 			ORDER BY t.start_time DESC
 			LIMIT $4 OFFSET $5
 		`, bikeID, from, to, limit, offset)

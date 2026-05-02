@@ -120,7 +120,9 @@ func (d *Detector) Process(ctx context.Context, now time.Time, current map[strin
 			continue
 		}
 		if ot, ok := d.openTrips[bikeID]; ok {
-			if now.Sub(ot.startTime) > 10*time.Minute {
+			// Close only when the bike has been absent for >10 min, not based on
+			// trip duration — a long ride with a brief GBFS blip must not be cut short.
+			if now.Sub(prev.SeenAt) > 30*time.Minute {
 				d.closeTrip(ctx, bikeID, ot, now, prev)
 				delete(d.openTrips, bikeID)
 			}
@@ -166,8 +168,36 @@ func (d *Detector) gpsPathDistance(ctx context.Context, bikeID string, startTime
 	return int(total * 1.3)
 }
 
+// isGhostTrip returns true when the trip is almost certainly a GBFS connectivity
+// blip rather than a real ride. Two patterns observed in the wild:
+//  1. Bike blinks off a charging station and reappears at the same station within
+//     10 min while the battery went up (or stayed equal) → charging artefact.
+//  2. Any "trip" shorter than 3 min with under 150 m displacement → noise.
+func isGhostTrip(startSID, endSID *string, battStart, battEnd, dist int, duration time.Duration) bool {
+	if sameStation(startSID, endSID) && battEnd >= battStart && duration < 10*time.Minute {
+		return true
+	}
+	if dist < 150 && duration < 3*time.Minute {
+		return true
+	}
+	return false
+}
+
 func (d *Detector) closeTrip(ctx context.Context, bikeID string, ot openTrip, endTime time.Time, endState BikeState) {
+	duration := endTime.Sub(ot.startTime)
 	dist := d.gpsPathDistance(ctx, bikeID, ot.startTime, endTime, ot.startLat, ot.startLon, endState.Lat, endState.Lon)
+
+	if isGhostTrip(ot.startStationID, endState.StationID, ot.batteryStart, endState.Battery, dist, duration) {
+		slog.Info("ghost trip discarded",
+			"bike", bikeID,
+			"duration", duration.Round(time.Second),
+			"distance_m", dist,
+			"same_station", sameStation(ot.startStationID, endState.StationID),
+			"battery_delta", endState.Battery-ot.batteryStart,
+		)
+		return
+	}
+
 	err := d.db.InsertTrip(ctx,
 		bikeID,
 		ot.startTime, endTime,
@@ -182,7 +212,7 @@ func (d *Detector) closeTrip(ctx context.Context, bikeID string, ot openTrip, en
 	}
 	slog.Info("trip closed",
 		"bike", bikeID,
-		"duration", endTime.Sub(ot.startTime).Round(time.Second),
+		"duration", duration.Round(time.Second),
 		"distance_m", dist,
 	)
 }

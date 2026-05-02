@@ -79,12 +79,44 @@ func GetBike(pool *db.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		bikeID := c.Param("id")
 		var b models.Bike
-		err := pool.QueryRow(c.Request.Context(),
-			`SELECT bike_id, vehicle_type_id, first_seen, last_seen FROM bikes WHERE bike_id = $1`, bikeID).
-			Scan(&b.BikeID, &b.VehicleTypeID, &b.FirstSeen, &b.LastSeen)
+		var (
+			rangeMeters  *int
+			lat, lon     *float64
+			stationID    *string
+			stationName  *string
+			isDisabled   *bool
+			snapshotTime *time.Time
+		)
+		err := pool.QueryRow(c.Request.Context(), `
+			SELECT b.bike_id, b.vehicle_type_id, b.first_seen, b.last_seen,
+				s.current_range_meters, s.lat, s.lon, s.station_id, s.is_disabled, s.time,
+				st.name
+			FROM bikes b
+			LEFT JOIN LATERAL (
+				SELECT time, lat, lon, station_id, is_disabled, current_range_meters
+				FROM bike_snapshots
+				WHERE bike_id = b.bike_id
+				ORDER BY time DESC LIMIT 1
+			) s ON true
+			LEFT JOIN stations st ON st.station_id = s.station_id
+			WHERE b.bike_id = $1
+		`, bikeID).Scan(
+			&b.BikeID, &b.VehicleTypeID, &b.FirstSeen, &b.LastSeen,
+			&rangeMeters, &lat, &lon, &stationID, &isDisabled, &snapshotTime, &stationName,
+		)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "bike not found"})
 			return
+		}
+		if rangeMeters != nil {
+			pct := batteryPct(*rangeMeters)
+			b.CurrentBatteryPct = &pct
+			b.CurrentLat = lat
+			b.CurrentLon = lon
+			b.CurrentStationID = stationID
+			b.CurrentStationName = stationName
+			b.IsCurrentlyDisabled = isDisabled
+			b.LastSnapshotTime = snapshotTime
 		}
 		c.JSON(http.StatusOK, b)
 	}
@@ -168,6 +200,11 @@ func GetBikeStats(pool *db.Pool) gin.HandlerFunc {
 		_ = pool.QueryRow(ctx, `
 			SELECT COUNT(*), COALESCE(SUM(distance_meters), 0) / 1000.0
 			FROM trips WHERE bike_id = $1
+			  AND NOT (
+			    start_station_id IS NOT DISTINCT FROM end_station_id
+			    AND end_time - start_time < INTERVAL '10 minutes'
+			    AND COALESCE(distance_meters, 0) < 200
+			  )
 		`, bikeID).Scan(&stats.TotalTrips, &stats.TotalDistanceKm)
 
 		var avgRange *float64
@@ -227,6 +264,11 @@ func GetBikeHealth(pool *db.Pool) gin.HandlerFunc {
 			SELECT COUNT(*) FROM trips
 			WHERE bike_id = $1
 			  AND start_time > NOW() - INTERVAL '30 days'
+			  AND NOT (
+			    start_station_id IS NOT DISTINCT FROM end_station_id
+			    AND end_time - start_time < INTERVAL '10 minutes'
+			    AND COALESCE(distance_meters, 0) < 200
+			  )
 		`, bikeID).Scan(&h.Trips30d)
 
 		// Score calculation

@@ -39,6 +39,11 @@ func GetFleetStats(pool *db.Pool) gin.HandlerFunc {
 				COUNT(*) FILTER (WHERE start_time >= CURRENT_DATE),
 				COUNT(*) FILTER (WHERE start_time >= NOW() - INTERVAL '7 days')
 			FROM trips
+			WHERE NOT (
+			    start_station_id IS NOT DISTINCT FROM end_station_id
+			    AND end_time - start_time < INTERVAL '10 minutes'
+			    AND COALESCE(distance_meters, 0) < 200
+			)
 		`).Scan(&stats.TripsToday, &stats.TripsWeek)
 
 		c.JSON(http.StatusOK, stats)
@@ -59,6 +64,11 @@ func GetTripsPerDay(pool *db.Pool) gin.HandlerFunc {
 			       COUNT(*) AS count
 			FROM trips
 			WHERE start_time >= NOW() - make_interval(days => $1)
+			  AND NOT (
+			    start_station_id IS NOT DISTINCT FROM end_station_id
+			    AND end_time - start_time < INTERVAL '10 minutes'
+			    AND COALESCE(distance_meters, 0) < 200
+			  )
 			GROUP BY 1 ORDER BY 1
 		`, days)
 		if err != nil {
@@ -141,6 +151,11 @@ func GetHeatmap(pool *db.Pool) gin.HandlerFunc {
 				FROM trips
 				WHERE start_time > NOW() - make_interval(days => $1)
 				  AND start_lat IS NOT NULL AND start_lat != 0
+				  AND NOT (
+				    start_station_id IS NOT DISTINCT FROM end_station_id
+				    AND end_time - start_time < INTERVAL '10 minutes'
+				    AND COALESCE(distance_meters, 0) < 200
+				  )
 				GROUP BY 1, 2
 
 				UNION ALL
@@ -152,6 +167,11 @@ func GetHeatmap(pool *db.Pool) gin.HandlerFunc {
 				WHERE start_time > NOW() - make_interval(days => $1)
 				  AND end_lat IS NOT NULL AND end_lat != 0
 				  AND end_station_id IS NOT NULL
+				  AND NOT (
+				    start_station_id IS NOT DISTINCT FROM end_station_id
+				    AND end_time - start_time < INTERVAL '10 minutes'
+				    AND COALESCE(distance_meters, 0) < 200
+				  )
 				GROUP BY 1, 2
 			) combined
 			WHERE weight > 0
@@ -188,6 +208,11 @@ func GetBusiestStations(pool *db.Pool) gin.HandlerFunc {
 			FROM stations s
 			LEFT JOIN trips t ON (t.start_station_id = s.station_id OR t.end_station_id = s.station_id)
 				AND t.start_time >= NOW() - INTERVAL '7 days'
+				AND NOT (
+				    t.start_station_id IS NOT DISTINCT FROM t.end_station_id
+				    AND t.end_time - t.start_time < INTERVAL '10 minutes'
+				    AND COALESCE(t.distance_meters, 0) < 200
+				)
 			GROUP BY s.station_id, s.name
 			ORDER BY trip_count DESC
 			LIMIT $1

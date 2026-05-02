@@ -28,6 +28,12 @@ function healthColor(score: number) {
   return '#ef4444'
 }
 
+function batteryColor(pct: number) {
+  if (pct >= 60) return '#22c55e'
+  if (pct >= 30) return '#f97316'
+  return '#ef4444'
+}
+
 function fmt(n?: number, unit = '') {
   if (n === undefined || n === null) return '—'
   return `${Math.round(n)}${unit}`
@@ -110,6 +116,43 @@ export function BikeDetailPage() {
         )}
       </div>
       <div style={{ fontSize: 13, color: '#64748b' }}>Type : {bike?.vehicle_type_id ?? '—'}</div>
+
+      {/* Current state */}
+      {bike?.current_battery_pct != null && (
+        <div style={{ background: '#1e293b', borderRadius: 8, padding: '12px 20px', marginTop: 12, display: 'flex', gap: 32, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1 }}>Batterie</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+              <div style={{ width: 80, height: 10, borderRadius: 4, background: '#0f172a', border: '1px solid #334155', overflow: 'hidden' }}>
+                <div style={{ width: `${bike.current_battery_pct}%`, height: '100%', background: batteryColor(bike.current_battery_pct), borderRadius: 4 }} />
+              </div>
+              <span style={{ color: batteryColor(bike.current_battery_pct), fontWeight: 700, fontSize: 15 }}>
+                {bike.current_battery_pct}%
+              </span>
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1 }}>Emplacement</div>
+            <div style={{ fontSize: 13, marginTop: 6 }}>
+              {bike.current_station_name
+                ? <span style={{ color: '#22c55e' }}>● {bike.current_station_name}</span>
+                : <span style={{ color: '#f97316' }}>● En déplacement ({bike.current_lat?.toFixed(4)}, {bike.current_lon?.toFixed(4)})</span>
+              }
+            </div>
+          </div>
+          {bike.is_currently_disabled && (
+            <div style={{ fontSize: 13, color: '#ef4444', fontWeight: 600 }}>⚠ Hors service</div>
+          )}
+          {bike.last_snapshot_time && (
+            <div style={{ marginLeft: 'auto' }}>
+              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1 }}>Dernière MAJ</div>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 6 }}>
+                {new Date(bike.last_snapshot_time).toLocaleString('fr-FR')}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Health score breakdown */}
       {health && (
@@ -240,7 +283,7 @@ export function BikeDetailPage() {
                     : '—'}
                 </td>
                 <td style={{ ...S.td, fontSize: 11, color: '#64748b' }}>
-                  {t.start_station_name ?? t.start_station_id?.slice(0, 8) ?? '?'} → {t.end_station_name ?? t.end_station_id?.slice(0, 8) ?? '?'}
+                  {t.start_station_name ?? t.start_station_id?.slice(0, 8) ?? '—'} → {t.end_station_name ?? t.end_station_id?.slice(0, 8) ?? 'Libre'}
                 </td>
               </tr>
             ))}

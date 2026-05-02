@@ -35,6 +35,14 @@ type Bike struct {
 	VehicleTypeID string    `json:"vehicle_type_id"`
 	FirstSeen     time.Time `json:"first_seen"`
 	LastSeen      time.Time `json:"last_seen"`
+	// Current state — populated by GetBike, absent in list endpoints.
+	CurrentBatteryPct   *int       `json:"current_battery_pct,omitempty"`
+	CurrentLat          *float64   `json:"current_lat,omitempty"`
+	CurrentLon          *float64   `json:"current_lon,omitempty"`
+	CurrentStationID    *string    `json:"current_station_id,omitempty"`
+	CurrentStationName  *string    `json:"current_station_name,omitempty"`
+	IsCurrentlyDisabled *bool      `json:"is_currently_disabled,omitempty"`
+	LastSnapshotTime    *time.Time `json:"last_snapshot_time,omitempty"`
 }
 
 type BikeSnapshot struct {
