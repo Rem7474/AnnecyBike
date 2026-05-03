@@ -72,13 +72,15 @@ export function BikeDetailPage() {
 
   // Build trajectory polyline segments: each continuous free-floating period
   // becomes its own segment, so we don't draw phantom lines between separate trips.
+  // Points at (0,0) are skipped: providers that only update GPS inside station
+  // geofences emit null-island coordinates while a bike is in motion.
   const trajectorySegments: [number, number][][] = []
   {
     let seg: [number, number][] = []
     // trajectory arrives newest-first; reverse to walk chronologically
     for (const s of (trajectory ?? []).slice().reverse()) {
       if (s.station_id === null) {
-        seg.push([s.lat, s.lon])
+        if (s.lat !== 0 || s.lon !== 0) seg.push([s.lat, s.lon])
       } else {
         if (seg.length > 1) trajectorySegments.push(seg)
         seg = []
@@ -86,6 +88,7 @@ export function BikeDetailPage() {
     }
     if (seg.length > 1) trajectorySegments.push(seg)
   }
+  const hasNoGpsData = (trajectory ?? []).filter(s => s.station_id === null).every(s => s.lat === 0 && s.lon === 0)
 
   const tripLines = (trips ?? [])
     .filter((t) => t.start_lat !== 0 && t.start_lon !== 0 && t.end_lat !== 0 && t.end_lon !== 0)
@@ -225,6 +228,11 @@ export function BikeDetailPage() {
 
         <div>
           <div style={S.sectionTitle}>Trajectoires — 24 dernières heures</div>
+          {hasNoGpsData && (trajectory ?? []).length > 0 && (
+            <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>
+              ⚠ Le provider GBFS ne publie pas le GPS en temps réel — position uniquement mise à jour aux stations (geofences). Les trajets A→B sont affichés en pointillés.
+            </div>
+          )}
           <div style={{ borderRadius: 8, overflow: 'hidden', height: 232 }}>
             <MapContainer center={mapCenter} zoom={13} style={{ height: '100%' }} zoomControl={false}>
               <TileLayer

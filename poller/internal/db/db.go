@@ -188,6 +188,14 @@ func (p *Pool) FetchLatestBikeStates(ctx context.Context) ([]BikeStateRow, error
 	return result, rows.Err()
 }
 
+// FetchStationCoords returns the lat/lon of a station by ID.
+// Used as a reliable fallback when bike snapshot coordinates are 0,0 — which
+// happens with providers that only publish GPS inside geofenced station areas.
+func (p *Pool) FetchStationCoords(ctx context.Context, stationID string) (lat, lon float64, err error) {
+	err = p.Pool.QueryRow(ctx, `SELECT lat, lon FROM stations WHERE station_id = $1`, stationID).Scan(&lat, &lon)
+	return
+}
+
 // FetchBikePathPoints returns ordered (lat, lon) pairs for free-floating snapshots
 // of a given bike between from and to, used for GPS-path distance calculation.
 func (p *Pool) FetchBikePathPoints(ctx context.Context, bikeID string, from, to time.Time) ([][2]float64, error) {

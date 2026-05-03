@@ -19,12 +19,24 @@ type BikeState struct {
 	SeenAt     time.Time
 }
 
+// pendingClose holds an arrival observation that is buffered for one poll.
+// GBFS feeds often return the old (departure) station for one cycle before
+// updating to the real destination, producing false A→A trips. We wait one
+// more observation before committing the close.
+type pendingClose struct {
+	endTime  time.Time
+	endState BikeState
+}
+
 type openTrip struct {
 	startTime      time.Time
 	startStationID *string
 	startLat       float64
 	startLon       float64
 	batteryStart   int
+	// Non-nil when the bike arrived at its departure station last poll.
+	// Resolved on the next observation.
+	pendingClose *pendingClose
 }
 
 // Detector maintains per-bike state across poll cycles and derives trips.
@@ -73,6 +85,34 @@ func (d *Detector) Process(ctx context.Context, now time.Time, current map[strin
 			continue
 		}
 
+		// ── Resolve a buffered same-station arrival from the previous poll ──
+		// We deferred the close because GBFS sometimes briefly echoes the departure
+		// station before updating to the real destination (A→""→A→B pattern).
+		if ot, ok := d.openTrips[bikeID]; ok && ot.pendingClose != nil {
+			pc := ot.pendingClose
+			ot.pendingClose = nil
+			switch {
+			case cur.StationID != nil && sameStation(prev.StationID, cur.StationID):
+				// Confirmed: bike is still at the same station — genuine A→A arrival.
+				d.closeTrip(ctx, bikeID, ot, pc.endTime, pc.endState)
+				delete(d.openTrips, bikeID)
+			case cur.StationID != nil:
+				// Bike moved on to a different station: real destination was B, not A.
+				slog.Info("pending arrival redirected",
+					"bike", bikeID,
+					"from", stationStr(ot.startStationID),
+					"to", stationStr(cur.StationID),
+				)
+				d.closeTrip(ctx, bikeID, ot, now, cur)
+				delete(d.openTrips, bikeID)
+			default:
+				// Bike went free-floating again — cancel the tentative close.
+				d.openTrips[bikeID] = ot
+			}
+			d.lastState[bikeID] = cur
+			continue
+		}
+
 		prevDocked := prev.StationID != nil
 		curDocked := cur.StationID != nil
 
@@ -91,10 +131,17 @@ func (d *Detector) Process(ctx context.Context, now time.Time, current map[strin
 			slog.Info("trip started", "bike", bikeID, "from_station", stationStr(prev.StationID))
 
 		case !prevDocked && curDocked:
-			// Arrival: was free-floating, now at station.
+			// Arrival: was free-floating, now at a station.
 			if ot, ok := d.openTrips[bikeID]; ok {
-				d.closeTrip(ctx, bikeID, ot, now, cur)
-				delete(d.openTrips, bikeID)
+				if sameStation(ot.startStationID, cur.StationID) {
+					// Arrived at the departure station — buffer for one more poll.
+					// GBFS update lag can make the real destination look like A briefly.
+					ot.pendingClose = &pendingClose{endTime: now, endState: cur}
+					d.openTrips[bikeID] = ot
+				} else {
+					d.closeTrip(ctx, bikeID, ot, now, cur)
+					delete(d.openTrips, bikeID)
+				}
 			}
 
 		case prevDocked && curDocked && !sameStation(prev.StationID, cur.StationID):
@@ -117,41 +164,72 @@ func (d *Detector) Process(ctx context.Context, now time.Time, current map[strin
 	// Handle bikes that disappeared from the feed.
 	// Keep state alive for up to 2 hours so the teleport case can fire when the
 	// bike returns (covers rentals where the provider removes the bike from the
-	// GBFS feed while it is in use). A single threshold avoids the previous
-	// two-tier bug where the 15-min cleanup deleted state before the 30-min
-	// trip-close could ever run.
+	// GBFS feed while it is in use).
 	for bikeID, prev := range d.lastState {
 		if _, stillPresent := current[bikeID]; stillPresent {
 			continue
 		}
-		if now.Sub(prev.SeenAt) <= 2*time.Hour {
-			continue
-		}
+
 		if ot, ok := d.openTrips[bikeID]; ok {
-			d.closeTrip(ctx, bikeID, ot, prev.SeenAt, prev)
-			delete(d.openTrips, bikeID)
+			if ot.pendingClose != nil {
+				// Bike was at its departure station and has now left the feed.
+				// Treat as confirmed arrival (it parked, then the GBFS dropped it).
+				d.closeTrip(ctx, bikeID, ot, ot.pendingClose.endTime, ot.pendingClose.endState)
+				delete(d.openTrips, bikeID)
+				continue
+			}
+			if now.Sub(prev.SeenAt) > 2*time.Hour {
+				d.closeTrip(ctx, bikeID, ot, prev.SeenAt, prev)
+				delete(d.openTrips, bikeID)
+			} else {
+				continue // within 2-hour window — keep state and open trip alive
+			}
 		}
-		delete(d.lastState, bikeID)
+
+		if now.Sub(prev.SeenAt) > 2*time.Hour {
+			delete(d.lastState, bikeID)
+		}
 	}
 }
 
 // gpsPathDistance computes the total estimated cycling distance by walking the
 // recorded GPS path: departure station → free-floating snapshots → arrival station.
 // A 1.3 detour factor is applied uniformly to account for road curvature.
-func (d *Detector) gpsPathDistance(ctx context.Context, bikeID string, startTime, endTime time.Time, startLat, startLon, endLat, endLon float64) int {
+//
+// Many GBFS providers (including Velonecy) only update bike GPS inside geofenced
+// station areas. Free-floating snapshots therefore often carry lat=0,lon=0 or the
+// stale departure-station coordinates. Both cases are handled:
+//   - 0,0 intermediate points are skipped (null-island avoidance).
+//   - 0,0 endpoints fall back to station coordinates fetched from the DB.
+func (d *Detector) gpsPathDistance(ctx context.Context, bikeID string, startTime, endTime time.Time, startLat, startLon float64, startSID *string, endLat, endLon float64, endSID *string) int {
+	// Resolve 0,0 endpoints using reliable station coordinates.
+	if startLat == 0 && startLon == 0 && startSID != nil {
+		if lat, lon, err := d.db.FetchStationCoords(ctx, *startSID); err == nil {
+			startLat, startLon = lat, lon
+		}
+	}
+	if endLat == 0 && endLon == 0 && endSID != nil {
+		if lat, lon, err := d.db.FetchStationCoords(ctx, *endSID); err == nil {
+			endLat, endLon = lat, lon
+		}
+	}
+
 	pts, err := d.db.FetchBikePathPoints(ctx, bikeID, startTime, endTime)
 	if err != nil {
 		pts = nil
 	}
 
-	// Full path: departure coord → free-floating GPS points → arrival coord.
-	// Skip 0,0 endpoints: some GBFS providers omit lat/lon for docked bikes,
-	// which would produce wildly incorrect distances via null-island (Gulf of Guinea).
+	// Build full path: departure coord → valid free-floating GPS points → arrival coord.
+	// Skip any point at (0,0): providers that don't track GPS in motion emit null-island.
 	path := make([][2]float64, 0, len(pts)+2)
 	if startLat != 0 || startLon != 0 {
 		path = append(path, [2]float64{startLat, startLon})
 	}
-	path = append(path, pts...)
+	for _, pt := range pts {
+		if pt[0] != 0 || pt[1] != 0 {
+			path = append(path, pt)
+		}
+	}
 	if endLat != 0 || endLon != 0 {
 		path = append(path, [2]float64{endLat, endLon})
 	}
@@ -193,7 +271,7 @@ func differentStations(a, b *string) bool {
 
 func (d *Detector) closeTrip(ctx context.Context, bikeID string, ot openTrip, endTime time.Time, endState BikeState) {
 	duration := endTime.Sub(ot.startTime)
-	dist := d.gpsPathDistance(ctx, bikeID, ot.startTime, endTime, ot.startLat, ot.startLon, endState.Lat, endState.Lon)
+	dist := d.gpsPathDistance(ctx, bikeID, ot.startTime, endTime, ot.startLat, ot.startLon, ot.startStationID, endState.Lat, endState.Lon, endState.StationID)
 
 	if isGhostTrip(ot.startStationID, endState.StationID, ot.batteryStart, endState.Battery, dist, duration) {
 		slog.Info("ghost trip discarded",
