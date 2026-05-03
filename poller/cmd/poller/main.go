@@ -47,25 +47,46 @@ func main() {
 	}
 	defer pool.Close()
 
-	client := gbfs.NewClient(cfg.GBFSBaseURL)
-	detector := trip.NewDetector(pool)
+	// GBFS auto-discovery: fetch gbfs.json to resolve all feed URLs.
+	client, err := gbfs.NewClient(ctx, cfg.GBFSURL)
+	if err != nil {
+		slog.Error("GBFS discovery failed", "url", cfg.GBFSURL, "err", err)
+		os.Exit(1)
+	}
+	slog.Info("GBFS discovery complete", "url", cfg.GBFSURL)
 
+	detector := trip.NewDetector(pool)
 	if err := detector.HydrateState(ctx); err != nil {
 		slog.Warn("could not hydrate detector state from DB", "err", err)
 	}
 
 	slog.Info("poller started", "interval", cfg.PollInterval)
 
-	// Run immediately on startup, then on ticker
+	// Fetch geofencing zones once at startup, then every hour.
+	jobs.PollGeofencing(ctx, client, pool)
+	geoTicker := time.NewTicker(time.Hour)
+	defer geoTicker.Stop()
+	go func() {
+		for {
+			select {
+			case <-geoTicker.C:
+				pollCtx, pollCancel := context.WithTimeout(ctx, 30*time.Second)
+				jobs.PollGeofencing(pollCtx, client, pool)
+				pollCancel()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Regular poll: stations first (ensures FK rows exist before bike snapshots).
 	runPoll := func() {
 		pollCtx, pollCancel := context.WithTimeout(ctx, 30*time.Second)
 		defer pollCancel()
 
-		// Run both jobs; station job first to ensure station rows exist before bike FK refs
 		jobs.PollStations(pollCtx, client, pool)
 		jobs.PollBikes(pollCtx, client, pool, detector)
 
-		// Notify backend via PostgreSQL NOTIFY
 		if err := pool.NotifyPollDone(ctx); err != nil {
 			slog.Warn("pg_notify failed", "err", err)
 		}

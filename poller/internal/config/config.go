@@ -8,9 +8,9 @@ import (
 )
 
 type Config struct {
-	DBURL               string
-	GBFSBaseURL         string
-	PollInterval        time.Duration
+	DBURL        string
+	GBFSURL      string
+	PollInterval time.Duration
 }
 
 func Load() (*Config, error) {
@@ -19,9 +19,9 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("DB_URL is required")
 	}
 
-	gbfsBase := os.Getenv("GBFS_BASE_URL")
-	if gbfsBase == "" {
-		gbfsBase = "https://gbfs.partners.fifteen.eu/gbfs/2.2/annecy/en"
+	gbfsURL := os.Getenv("GBFS_URL")
+	if gbfsURL == "" {
+		gbfsURL = "https://gbfs.partners.fifteen.eu/gbfs/annecy/gbfs.json"
 	}
 
 	intervalSec := 60
@@ -35,7 +35,7 @@ func Load() (*Config, error) {
 
 	return &Config{
 		DBURL:        dbURL,
-		GBFSBaseURL:  gbfsBase,
+		GBFSURL:      gbfsURL,
 		PollInterval: time.Duration(intervalSec) * time.Second,
 	}, nil
 }

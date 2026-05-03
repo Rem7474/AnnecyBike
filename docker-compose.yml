@@ -19,7 +19,7 @@ services:
     build: ./poller
     environment:
       DB_URL: postgres://${POSTGRES_USER:-annecybike}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-annecybike}
-      GBFS_BASE_URL: https://gbfs.partners.fifteen.eu/gbfs/2.2/annecy/en
+      GBFS_URL: https://gbfs.partners.fifteen.eu/gbfs/annecy/gbfs.json
       POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-60}
     depends_on:
       db:

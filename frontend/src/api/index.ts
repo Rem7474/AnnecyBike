@@ -1,7 +1,7 @@
 import type {
   Anomaly, Bike, BikeLive, BikeHealth, BikeSnapshot, BikeStats,
   BusiestStation, BatteryBucket, DailyCount, FleetStats,
-  HeatPoint, NearestBike, NearestStation, ReplayBucket, Station, StationBike, Trip,
+  GeoJsonFeatureCollection, HeatPoint, NearestBike, NearestStation, ReplayBucket, Station, StationBike, Trip,
 } from '../types'
 
 const BASE = '/api/v1'
@@ -54,6 +54,9 @@ export const api = {
   },
   anomalies: {
     list: () => get<Anomaly[]>(`${BASE}/anomalies`),
+  },
+  geofencing: {
+    zones: () => get<GeoJsonFeatureCollection>(`${BASE}/geofencing`),
   },
   replay: {
     get: (date: string, resolution = 10) =>

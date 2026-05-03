@@ -188,6 +188,19 @@ func (p *Pool) FetchLatestBikeStates(ctx context.Context) ([]BikeStateRow, error
 	return result, rows.Err()
 }
 
+// UpsertGeofencingZones stores the latest geofencing GeoJSON (single-row table,
+// always id=1). Called once per hour by the geofencing poll job.
+func (p *Pool) UpsertGeofencingZones(ctx context.Context, geojson []byte) error {
+	_, err := p.Exec(ctx, `
+		INSERT INTO geofencing_zones (id, fetched_at, geojson)
+		VALUES (1, NOW(), $1)
+		ON CONFLICT (id) DO UPDATE SET
+			fetched_at = NOW(),
+			geojson    = EXCLUDED.geojson
+	`, geojson)
+	return err
+}
+
 // FetchStationCoords returns the lat/lon of a station by ID.
 // Used as a reliable fallback when bike snapshot coordinates are 0,0 — which
 // happens with providers that only publish GPS inside geofenced station areas.

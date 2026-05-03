@@ -100,6 +100,12 @@ export function MapFiltersPanel({ filters, onChange }: Props) {
           <span style={label}>Heatmap trajets</span>
         </label>
       </div>
+
+      <label style={row}>
+        <input type="checkbox" checked={filters.showGeofencing}
+          onChange={(e) => set({ showGeofencing: e.target.checked })} />
+        <span style={label}>Zones geofencing</span>
+      </label>
     </div>
   )
 }

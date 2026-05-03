@@ -26,3 +26,14 @@ func Connect(ctx context.Context, dbURL string) (*Pool, error) {
 	}
 	return &Pool{pool}, nil
 }
+
+// FetchGeofencingZones returns the latest geofencing GeoJSON stored by the poller.
+// Returns nil, nil if no zones have been fetched yet.
+func (p *Pool) FetchGeofencingZones(ctx context.Context) ([]byte, error) {
+	var raw []byte
+	err := p.QueryRow(ctx, `SELECT geojson FROM geofencing_zones WHERE id = 1`).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}

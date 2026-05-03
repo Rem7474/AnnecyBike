@@ -75,6 +75,8 @@ func main() {
 
 		v1.GET("/anomalies", handlers.GetAnomalies(pool))
 
+		v1.GET("/geofencing", handlers.GetGeofencingZones(pool))
+
 		v1.GET("/replay", handlers.GetReplay(pool))
 
 		v1.GET("/stats/fleet", handlers.GetFleetStats(pool))

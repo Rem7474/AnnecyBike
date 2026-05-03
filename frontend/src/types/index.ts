@@ -130,6 +130,15 @@ export interface StationBike {
   health_label: string
 }
 
+export interface GeoJsonFeatureCollection {
+  type: 'FeatureCollection'
+  features: {
+    type: 'Feature'
+    geometry: { type: string; coordinates: unknown }
+    properties: Record<string, unknown>
+  }[]
+}
+
 export interface HeatPoint {
   lat: number
   lon: number
@@ -190,4 +199,5 @@ export interface MapFilters {
   showManual: boolean
   hideDisabled: boolean
   showHeatmap: boolean
+  showGeofencing: boolean
 }

@@ -1,7 +1,7 @@
-import { useState } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import { useState, useMemo } from 'react'
+import { MapContainer, TileLayer, Marker, Popup, GeoJSON, useMap } from 'react-leaflet'
 import { Icon, DivIcon } from 'leaflet'
-import type { BikeLive, Station, MapFilters, HeatPoint } from '../../types'
+import type { BikeLive, GeoJsonFeatureCollection, Station, MapFilters, HeatPoint } from '../../types'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../../api'
@@ -92,11 +92,12 @@ interface MapContentProps {
   stations: Station[]
   filters: MapFilters
   heatPoints: HeatPoint[]
+  geofencingZones: GeoJsonFeatureCollection | undefined
   showReplay: boolean
   onCloseReplay: () => void
 }
 
-function MapContent({ bikes, stations, filters, heatPoints, showReplay, onCloseReplay }: MapContentProps) {
+function MapContent({ bikes, stations, filters, heatPoints, geofencingZones, showReplay, onCloseReplay }: MapContentProps) {
   const navigate = useNavigate()
 
   const filteredBikes = bikes.filter((b) => {
@@ -108,9 +109,26 @@ function MapContent({ bikes, stations, filters, heatPoints, showReplay, onCloseR
     return true
   })
 
+  // Stable key so the GeoJSON layer is replaced (not re-styled) when data changes.
+  const geoKey = useMemo(() => geofencingZones ? JSON.stringify(geofencingZones).length : 0, [geofencingZones])
+
   return (
     <>
       {filters.showHeatmap && <HeatmapLayer points={heatPoints} />}
+
+      {filters.showGeofencing && geofencingZones && (
+        <GeoJSON
+          key={geoKey}
+          data={geofencingZones as any}
+          style={() => ({
+            color: '#f59e0b',
+            weight: 1.5,
+            fillColor: '#f59e0b',
+            fillOpacity: 0.08,
+            dashArray: '4 3',
+          })}
+        />
+      )}
 
       {filters.showStations && stations.map((st) => {
         const avail = st.num_bikes_available ?? 0
@@ -170,6 +188,7 @@ const DEFAULT_FILTERS: MapFilters = {
   showManual: true,
   hideDisabled: false,
   showHeatmap: false,
+  showGeofencing: false,
 }
 
 export function LiveMap({ bikes, stations }: Props) {
@@ -181,6 +200,13 @@ export function LiveMap({ bikes, stations }: Props) {
     queryFn: () => api.stats.heatmap(30),
     enabled: filters.showHeatmap,
     staleTime: 5 * 60_000,
+  })
+
+  const { data: geofencingZones } = useQuery({
+    queryKey: ['geofencing-zones'],
+    queryFn: api.geofencing.zones,
+    enabled: filters.showGeofencing,
+    staleTime: 60 * 60_000, // zones rarely change
   })
 
   return (
@@ -200,6 +226,7 @@ export function LiveMap({ bikes, stations }: Props) {
           stations={stations}
           filters={filters}
           heatPoints={heatPoints}
+          geofencingZones={geofencingZones}
           showReplay={showReplay}
           onCloseReplay={() => setShowReplay((v) => !v)}
         />

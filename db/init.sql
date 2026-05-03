@@ -32,6 +32,13 @@ CREATE TABLE IF NOT EXISTS bikes (
     last_seen       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Geofencing zones (latest snapshot from geofencing_zones.json, single row)
+CREATE TABLE IF NOT EXISTS geofencing_zones (
+    id         INT PRIMARY KEY DEFAULT 1,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    geojson    JSONB NOT NULL
+);
+
 -- ============================================================
 -- Time-series hypertables
 -- ============================================================
