@@ -204,18 +204,25 @@ func GetStationBikeHistory(pool *db.Pool) gin.HandlerFunc {
 				WHERE station_id = $1
 				  AND time > NOW() - CAST($2 AS INTERVAL)
 			),
+			-- Extend look-back by 10 minutes to get a valid LAG for bikes already
+			-- present at the start of the window (avoids false arrivals).
 			snaps AS (
 				SELECT bs.bike_id, bs.time, bs.station_id, bs.current_range_meters,
 					LAG(bs.station_id) OVER (PARTITION BY bs.bike_id ORDER BY bs.time) AS prev_sid
 				FROM bike_snapshots bs
 				JOIN relevant_bikes rb ON rb.bike_id = bs.bike_id
-				WHERE bs.time > NOW() - CAST($2 AS INTERVAL)
+				WHERE bs.time > NOW() - CAST($2 AS INTERVAL) - INTERVAL '10 minutes'
 			),
+			-- Arrival = confirmed transition from a different state into this station.
+			-- prev_sid IS NULL means first snapshot in the extended window — still
+			-- ambiguous, so we skip those to avoid counting long-parked bikes as arrivals.
 			arrivals AS (
 				SELECT bike_id, time AS arrived_at, current_range_meters AS battery
 				FROM snaps
 				WHERE station_id = $1
-				  AND (prev_sid IS NULL OR prev_sid != $1)
+				  AND time > NOW() - CAST($2 AS INTERVAL)
+				  AND prev_sid IS NOT NULL
+				  AND prev_sid != $1
 			),
 			departures AS (
 				SELECT bike_id, time AS departed_at
@@ -229,7 +236,14 @@ func GetStationBikeHistory(pool *db.Pool) gin.HandlerFunc {
 				d.departed_at,
 				a.battery,
 				EXTRACT(epoch FROM (COALESCE(d.departed_at, NOW()) - a.arrived_at)) / 60 AS duration_min,
-				d.departed_at IS NULL AS still_present
+				-- True presence: check the bike's latest snapshot in the whole DB.
+				-- If it disappeared from the feed (rented), this returns false.
+				COALESCE((
+					SELECT bs2.station_id = $1
+					FROM bike_snapshots bs2
+					WHERE bs2.bike_id = a.bike_id
+					ORDER BY bs2.time DESC LIMIT 1
+				), false) AS still_present
 			FROM arrivals a
 			LEFT JOIN LATERAL (
 				SELECT departed_at FROM departures d2
