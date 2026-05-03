@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/annecybike/backend/internal/db"
@@ -176,6 +178,83 @@ func GetStationBikes(pool *db.Pool) gin.HandlerFunc {
 				HealthScore:   healthScore,
 				HealthLabel:   label,
 			})
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// GetStationBikeHistory returns each bike's docking visits at a station over a
+// configurable window (default 48h, max 7 days). It reconstructs arrival/departure
+// times from bike_snapshots using window functions — useful for debugging trip
+// detection and understanding station turnover.
+func GetStationBikeHistory(pool *db.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		stationID := c.Param("id")
+
+		hours := 48
+		if v, err := strconv.Atoi(c.DefaultQuery("hours", "48")); err == nil && v > 0 && v <= 168 {
+			hours = v
+		}
+		interval := fmt.Sprintf("%d hours", hours)
+
+		rows, err := pool.Query(c.Request.Context(), `
+			WITH relevant_bikes AS (
+				SELECT DISTINCT bike_id
+				FROM bike_snapshots
+				WHERE station_id = $1
+				  AND time > NOW() - CAST($2 AS INTERVAL)
+			),
+			snaps AS (
+				SELECT bs.bike_id, bs.time, bs.station_id, bs.current_range_meters,
+					LAG(bs.station_id) OVER (PARTITION BY bs.bike_id ORDER BY bs.time) AS prev_sid
+				FROM bike_snapshots bs
+				JOIN relevant_bikes rb ON rb.bike_id = bs.bike_id
+				WHERE bs.time > NOW() - CAST($2 AS INTERVAL)
+			),
+			arrivals AS (
+				SELECT bike_id, time AS arrived_at, current_range_meters AS battery
+				FROM snaps
+				WHERE station_id = $1
+				  AND (prev_sid IS NULL OR prev_sid != $1)
+			),
+			departures AS (
+				SELECT bike_id, time AS departed_at
+				FROM snaps
+				WHERE (station_id IS NULL OR station_id != $1)
+				  AND prev_sid = $1
+			)
+			SELECT
+				a.bike_id,
+				a.arrived_at,
+				d.departed_at,
+				a.battery,
+				EXTRACT(epoch FROM (COALESCE(d.departed_at, NOW()) - a.arrived_at)) / 60 AS duration_min,
+				d.departed_at IS NULL AS still_present
+			FROM arrivals a
+			LEFT JOIN LATERAL (
+				SELECT departed_at FROM departures d2
+				WHERE d2.bike_id = a.bike_id AND d2.departed_at > a.arrived_at
+				ORDER BY departed_at ASC LIMIT 1
+			) d ON true
+			ORDER BY a.arrived_at DESC
+			LIMIT 200
+		`, stationID, interval)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+
+		result := make([]models.StationBikeVisit, 0)
+		for rows.Next() {
+			var v models.StationBikeVisit
+			if err := rows.Scan(
+				&v.BikeID, &v.ArrivedAt, &v.DepartedAt,
+				&v.BatteryArrival, &v.DurationMinutes, &v.StillPresent,
+			); err != nil {
+				continue
+			}
+			result = append(result, v)
 		}
 		c.JSON(http.StatusOK, result)
 	}

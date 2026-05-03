@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
@@ -31,8 +32,15 @@ function batteryBarColor(pct: number) {
   return '#ef4444'
 }
 
+function batteryColor(pct: number) {
+  if (pct >= 60) return '#22c55e'
+  if (pct >= 30) return '#f97316'
+  return '#ef4444'
+}
+
 export function StationDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const [bikeHistoryHours, setBikeHistoryHours] = useState(48)
 
   const { data: station } = useQuery({
     queryKey: ['station', id],
@@ -54,6 +62,10 @@ export function StationDetailPage() {
   const { data: trips } = useQuery({
     queryKey: ['station-trips', id],
     queryFn: () => api.trips.list({ station_id: id, limit: 20 }),
+  })
+  const { data: bikeHistory } = useQuery({
+    queryKey: ['station-bike-history', id, bikeHistoryHours],
+    queryFn: () => api.stations.bikeHistory(id!, bikeHistoryHours),
   })
 
   const chartData = (history ?? []).map((h) => ({
@@ -168,6 +180,70 @@ export function StationDetailPage() {
             </tbody>
           </table>
         )}
+      </div>
+
+      {/* Bike visit history */}
+      <div style={S.section}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <div style={S.sectionTitle}>Historique des vélos</div>
+          <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+            {[24, 48, 168].map((h) => (
+              <button key={h} onClick={() => setBikeHistoryHours(h)} style={{
+                padding: '3px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer', border: 'none',
+                background: bikeHistoryHours === h ? '#38bdf8' : '#1e293b',
+                color: bikeHistoryHours === h ? '#0f172a' : '#64748b',
+                fontWeight: bikeHistoryHours === h ? 700 : 400,
+              }}>
+                {h === 168 ? '7j' : `${h}h`}
+              </button>
+            ))}
+          </div>
+        </div>
+        <table style={S.table}>
+          <thead>
+            <tr>
+              <th style={S.th}>Vélo</th>
+              <th style={S.th}>Arrivée</th>
+              <th style={S.th}>Départ</th>
+              <th style={S.th}>Durée</th>
+              <th style={S.th}>Batterie à l'arrivée</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(bikeHistory ?? []).length === 0 && (
+              <tr><td colSpan={5} style={{ padding: '8px 10px', color: '#64748b' }}>Aucune visite enregistrée</td></tr>
+            )}
+            {(bikeHistory ?? []).map((v, i) => (
+              <tr key={i}>
+                <td style={S.td}>
+                  <Link to={`/bikes/${v.bike_id}`}
+                    style={{ color: '#38bdf8', textDecoration: 'none', fontFamily: 'monospace', fontSize: 12 }}>
+                    {v.bike_id.slice(0, 8)}…
+                  </Link>
+                </td>
+                <td style={{ ...S.td, fontSize: 12, whiteSpace: 'nowrap' as const }}>
+                  {new Date(v.arrived_at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                </td>
+                <td style={{ ...S.td, fontSize: 12, whiteSpace: 'nowrap' as const }}>
+                  {v.still_present
+                    ? <span style={{ color: '#22c55e' }}>● Présent</span>
+                    : v.departed_at
+                      ? new Date(v.departed_at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                      : '—'
+                  }
+                </td>
+                <td style={{ ...S.td, fontSize: 12 }}>
+                  {Math.round(v.duration_minutes)} min
+                </td>
+                <td style={S.td}>
+                  <span style={{ color: batteryColor(Math.round((v.battery_arrival / 45000) * 100)), fontWeight: 600, fontSize: 12 }}>
+                    {Math.round((v.battery_arrival / 45000) * 100)}%
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       <div style={S.section}>

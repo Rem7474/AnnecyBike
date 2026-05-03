@@ -1,7 +1,8 @@
 import type {
   Anomaly, Bike, BikeLive, BikeHealth, BikeSnapshot, BikeStats,
   BusiestStation, BatteryBucket, DailyCount, FleetStats,
-  GeoJsonFeatureCollection, HeatPoint, NearestBike, NearestStation, ReplayBucket, Station, StationBike, Trip,
+  GeoJsonFeatureCollection, HeatPoint, NearestBike, NearestStation, ReplayBucket,
+  Station, StationBike, StationBikeVisit, Trip,
 } from '../types'
 
 const BASE = '/api/v1'
@@ -44,6 +45,8 @@ export const api = {
     },
     nearest: (lat: number, lon: number, limit = 5) =>
       get<NearestStation[]>(`${BASE}/stations/nearest?lat=${lat}&lon=${lon}&limit=${limit}`),
+    bikeHistory: (id: string, hours = 48) =>
+      get<StationBikeVisit[]>(`${BASE}/stations/${id}/bike-history?hours=${hours}`),
   },
   trips: {
     list: (params: { bike_id?: string; station_id?: string; from?: string; to?: string; limit?: number }) => {

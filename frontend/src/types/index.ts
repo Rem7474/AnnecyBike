@@ -122,6 +122,15 @@ export interface BusiestStation {
   trip_count: number
 }
 
+export interface StationBikeVisit {
+  bike_id: string
+  arrived_at: string
+  departed_at?: string
+  battery_arrival: number
+  duration_minutes: number
+  still_present: boolean
+}
+
 export interface StationBike {
   bike_id: string
   vehicle_type_id: string

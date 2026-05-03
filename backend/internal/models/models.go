@@ -134,6 +134,16 @@ type BusiestStation struct {
 	TripCount int    `json:"trip_count"`
 }
 
+// StationBikeVisit represents one contiguous docking period of a bike at a station.
+type StationBikeVisit struct {
+	BikeID           string     `json:"bike_id"`
+	ArrivedAt        time.Time  `json:"arrived_at"`
+	DepartedAt       *time.Time `json:"departed_at,omitempty"` // nil = still present
+	BatteryArrival   int        `json:"battery_arrival"`
+	DurationMinutes  float64    `json:"duration_minutes"`
+	StillPresent     bool       `json:"still_present"`
+}
+
 type StationBike struct {
 	BikeID        string `json:"bike_id"`
 	VehicleTypeID string `json:"vehicle_type_id"`
