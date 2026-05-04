@@ -23,6 +23,16 @@ async function patch<T>(url: string, body: unknown): Promise<T> {
   return res.json()
 }
 
+async function post<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`)
+  return res.json()
+}
+
 export const api = {
   bikes: {
     live: () => get<BikeLive[]>(`${BASE}/bikes/live`),
@@ -40,6 +50,8 @@ export const api = {
     health: (id: string) => get<BikeHealth>(`${BASE}/bikes/${id}/health`),
     nearest: (lat: number, lon: number, limit = 5) =>
       get<NearestBike[]>(`${BASE}/bikes/nearest?lat=${lat}&lon=${lon}&limit=${limit}`),
+    assign: (bikeId: string, fleetNumber: string) =>
+      post<{ ok: boolean; physical_bike_id: number }>(`${BASE}/bikes/${bikeId}/assign`, { fleet_number: fleetNumber }),
   },
   stations: {
     live: () => get<Station[]>(`${BASE}/stations/live`),

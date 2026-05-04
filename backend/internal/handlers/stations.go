@@ -97,7 +97,7 @@ func GetStationBikes(pool *db.Pool) gin.HandlerFunc {
 		rows, err := pool.Query(ctx, `
 			WITH current AS (
 				SELECT DISTINCT ON (bs.bike_id)
-					bs.bike_id, b.vehicle_type_id, bs.current_range_meters
+					bs.bike_id, b.vehicle_type_id, bs.current_range_meters, b.physical_bike_id
 				FROM bike_snapshots bs
 				JOIN bikes b ON b.bike_id = bs.bike_id
 				WHERE bs.station_id = $1
@@ -135,11 +135,14 @@ func GetStationBikes(pool *db.Pool) gin.HandlerFunc {
 				c.bike_id, c.vehicle_type_id, c.current_range_meters,
 				COALESCE(bat.avg_range, 0),
 				COALESCE(dis.cnt, 0),
-				LEAST(COALESCE(trp.cnt, 0), 30)
+				LEAST(COALESCE(trp.cnt, 0), 30),
+				c.physical_bike_id,
+				pb.fleet_number
 			FROM current c
 			LEFT JOIN bat ON bat.bike_id = c.bike_id
 			LEFT JOIN dis ON dis.bike_id = c.bike_id
 			LEFT JOIN trp ON trp.bike_id = c.bike_id
+			LEFT JOIN physical_bikes pb ON pb.id = c.physical_bike_id
 			ORDER BY c.bike_id
 		`, stationID)
 		if err != nil {
@@ -152,7 +155,10 @@ func GetStationBikes(pool *db.Pool) gin.HandlerFunc {
 		for rows.Next() {
 			var bikeID, vehicleTypeID string
 			var rangeMeters, avgRange, disabledDays, trips30d int
-			if err := rows.Scan(&bikeID, &vehicleTypeID, &rangeMeters, &avgRange, &disabledDays, &trips30d); err != nil {
+			var physicalBikeID *int64
+			var fleetNumber *string
+			if err := rows.Scan(&bikeID, &vehicleTypeID, &rangeMeters, &avgRange, &disabledDays, &trips30d,
+				&physicalBikeID, &fleetNumber); err != nil {
 				continue
 			}
 			avgBatteryPct := batteryPct(avgRange)
@@ -172,11 +178,13 @@ func GetStationBikes(pool *db.Pool) gin.HandlerFunc {
 				label = "À réviser"
 			}
 			result = append(result, models.StationBike{
-				BikeID:        bikeID,
-				VehicleTypeID: vehicleTypeID,
-				BatteryPct:    batteryPct(rangeMeters),
-				HealthScore:   healthScore,
-				HealthLabel:   label,
+				BikeID:         bikeID,
+				VehicleTypeID:  vehicleTypeID,
+				BatteryPct:     batteryPct(rangeMeters),
+				HealthScore:    healthScore,
+				HealthLabel:    label,
+				PhysicalBikeID: physicalBikeID,
+				FleetNumber:    fleetNumber,
 			})
 		}
 		c.JSON(http.StatusOK, result)

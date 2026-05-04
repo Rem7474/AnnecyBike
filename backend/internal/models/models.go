@@ -177,11 +177,13 @@ type StationBikeVisit struct {
 }
 
 type StationBike struct {
-	BikeID        string `json:"bike_id"`
-	VehicleTypeID string `json:"vehicle_type_id"`
-	BatteryPct    int    `json:"battery_pct"`
-	HealthScore   int    `json:"health_score"`
-	HealthLabel   string `json:"health_label"`
+	BikeID         string  `json:"bike_id"`
+	VehicleTypeID  string  `json:"vehicle_type_id"`
+	BatteryPct     int     `json:"battery_pct"`
+	HealthScore    int     `json:"health_score"`
+	HealthLabel    string  `json:"health_label"`
+	PhysicalBikeID *int64  `json:"physical_bike_id,omitempty"`
+	FleetNumber    *string `json:"fleet_number,omitempty"`
 }
 
 type HeatPoint struct {

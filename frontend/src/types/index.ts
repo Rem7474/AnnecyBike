@@ -155,6 +155,8 @@ export interface StationBike {
   battery_pct: number
   health_score: number
   health_label: string
+  physical_bike_id?: number
+  fleet_number?: string
 }
 
 export interface GeoJsonFeatureCollection {

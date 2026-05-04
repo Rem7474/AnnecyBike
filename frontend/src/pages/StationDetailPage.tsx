@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { api } from '../api'
 
@@ -40,7 +40,25 @@ function batteryColor(pct: number) {
 
 export function StationDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const qc = useQueryClient()
   const [bikeHistoryHours, setBikeHistoryHours] = useState(48)
+  const [assigningBike, setAssigningBike] = useState<string | null>(null)
+  const [fleetInput, setFleetInput] = useState('')
+  const [assignError, setAssignError] = useState<string | null>(null)
+
+  const assignMutation = useMutation({
+    mutationFn: ({ bikeId, fleet }: { bikeId: string; fleet: string }) =>
+      api.bikes.assign(bikeId, fleet),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['station-bikes', id] })
+      setAssigningBike(null)
+      setFleetInput('')
+      setAssignError(null)
+      navigate(`/physical-bikes/${data.physical_bike_id}`)
+    },
+    onError: (err: Error) => setAssignError(err.message),
+  })
 
   const { data: station } = useQuery({
     queryKey: ['station', id],
@@ -127,7 +145,8 @@ export function StationDetailPage() {
           <table style={S.table}>
             <thead>
               <tr>
-                <th style={S.th}>Vélo</th>
+                <th style={S.th}>Vélo physique</th>
+                <th style={S.th}>ID GBFS</th>
                 <th style={S.th}>Type</th>
                 <th style={S.th}>Batterie</th>
                 <th style={S.th}>Santé (30j)</th>
@@ -136,10 +155,56 @@ export function StationDetailPage() {
             <tbody>
               {(stationBikes ?? []).map((b) => (
                 <tr key={b.bike_id}>
+                  {/* Physical bike assignment cell */}
+                  <td style={S.td}>
+                    {b.physical_bike_id ? (
+                      <Link
+                        to={`/physical-bikes/${b.physical_bike_id}`}
+                        style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: 700, fontFamily: 'monospace' }}
+                      >
+                        {b.fleet_number ? `#${b.fleet_number}` : `vélo ${b.physical_bike_id}`}
+                      </Link>
+                    ) : assigningBike === b.bike_id ? (
+                      <span style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <input
+                          autoFocus
+                          style={{
+                            background: '#0f172a', border: '1px solid #38bdf8', borderRadius: 4,
+                            color: '#f1f5f9', fontSize: 12, padding: '3px 7px', outline: 'none', width: 70,
+                          }}
+                          placeholder="N° flotte"
+                          value={fleetInput}
+                          onChange={e => { setFleetInput(e.target.value); setAssignError(null) }}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && fleetInput.trim()) assignMutation.mutate({ bikeId: b.bike_id, fleet: fleetInput.trim() })
+                            if (e.key === 'Escape') { setAssigningBike(null); setFleetInput('') }
+                          }}
+                        />
+                        <button
+                          onClick={() => assignMutation.mutate({ bikeId: b.bike_id, fleet: fleetInput.trim() })}
+                          disabled={!fleetInput.trim() || assignMutation.isPending}
+                          style={{ background: '#38bdf8', color: '#0f172a', border: 'none', borderRadius: 4, padding: '3px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+                        >✓</button>
+                        <button
+                          onClick={() => { setAssigningBike(null); setFleetInput(''); setAssignError(null) }}
+                          style={{ background: 'none', border: '1px solid #334155', borderRadius: 4, color: '#94a3b8', padding: '3px 6px', fontSize: 11, cursor: 'pointer' }}
+                        >✕</button>
+                        {assignError && <span style={{ color: '#ef4444', fontSize: 11 }}>Erreur</span>}
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => { setAssigningBike(b.bike_id); setFleetInput('') }}
+                        style={{ background: 'none', border: '1px dashed #334155', borderRadius: 4, color: '#64748b', fontSize: 11, padding: '3px 8px', cursor: 'pointer' }}
+                      >
+                        + Assigner
+                      </button>
+                    )}
+                  </td>
+                  {/* GBFS bike_id */}
                   <td style={S.td}>
                     <Link
                       to={`/bikes/${b.bike_id}`}
-                      style={{ color: '#38bdf8', textDecoration: 'none', fontFamily: 'monospace' }}
+                      style={{ color: '#475569', textDecoration: 'none', fontFamily: 'monospace', fontSize: 11 }}
                     >
                       {b.bike_id.slice(0, 8)}…
                     </Link>

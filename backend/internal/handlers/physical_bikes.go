@@ -232,6 +232,71 @@ func ReassignBike(pool *db.Pool) gin.HandlerFunc {
 	}
 }
 
+// AssignBike handles POST /bikes/:id/assign
+// Finds or creates a physical bike by fleet_number and links the bike_id to it.
+func AssignBike(pool *db.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		bikeID := c.Param("id")
+		var req struct {
+			FleetNumber string `json:"fleet_number"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.FleetNumber == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "fleet_number required"})
+			return
+		}
+		ctx := c.Request.Context()
+
+		// Find or create physical bike by fleet_number
+		var physicalID int64
+		err := pool.QueryRow(ctx,
+			`SELECT id FROM physical_bikes WHERE fleet_number = $1`, req.FleetNumber,
+		).Scan(&physicalID)
+		if err != nil {
+			// Create from the bike's own metadata
+			if err2 := pool.QueryRow(ctx, `
+				INSERT INTO physical_bikes (vehicle_type_id, fleet_number, first_seen, last_seen)
+				SELECT vehicle_type_id, $2, first_seen, last_seen FROM bikes WHERE bike_id = $1
+				RETURNING id
+			`, bikeID, req.FleetNumber).Scan(&physicalID); err2 != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err2.Error()})
+				return
+			}
+		}
+
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		defer tx.Rollback(ctx)
+
+		if _, err := tx.Exec(ctx,
+			`UPDATE bikes SET physical_bike_id = $2 WHERE bike_id = $1`, bikeID, physicalID,
+		); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE trips SET physical_bike_id = $2 WHERE bike_id = $1`, bikeID, physicalID,
+		); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE physical_bikes SET last_seen = NOW() WHERE id = $1`, physicalID,
+		); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "physical_bike_id": physicalID})
+	}
+}
+
 func GetPhysicalBikeTrips(pool *db.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		pid, err := strconv.ParseInt(c.Param("pid"), 10, 64)
