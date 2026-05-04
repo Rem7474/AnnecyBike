@@ -121,8 +121,9 @@ export function PhysicalBikeDetailPage() {
       api.physicalBikes.reassign(bikeId, targetPid),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['physical-bike', id] })
-      setReassignInput('')
-      setReassignTarget('')
+      setPullBikeId('')
+      setMoveBikeId('')
+      setMoveTarget('')
       setReassignMsg('Réaffectation effectuée.')
       setTimeout(() => setReassignMsg(null), 3000)
     },
