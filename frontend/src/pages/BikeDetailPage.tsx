@@ -39,6 +39,37 @@ function fmt(n?: number, unit = '') {
   return `${Math.round(n)}${unit}`
 }
 
+async function downloadRawHistory(id: string, hours: number) {
+  const to = new Date()
+  const from = new Date(to.getTime() - hours * 3600_000)
+  const p = new URLSearchParams({ resolution: 'raw', from: from.toISOString(), to: to.toISOString() })
+  const res = await fetch(`/api/v1/bikes/${id}/history?${p}`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const snapshots: { time: string; bike_id: string; lat: number; lon: number; station_id: string | null; is_disabled: boolean; current_range_meters: number }[] = await res.json()
+
+  const header = 'time,bike_id,lat,lon,station_id,is_disabled,current_range_meters,battery_pct'
+  const rows = snapshots.map(s =>
+    [
+      s.time,
+      s.bike_id,
+      s.lat,
+      s.lon,
+      s.station_id ?? '',
+      s.is_disabled,
+      s.current_range_meters,
+      Math.round((s.current_range_meters / 45000) * 100),
+    ].join(',')
+  )
+  const csv = [header, ...rows].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `bike_${id.slice(0, 8)}_raw_${hours}h.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export function BikeDetailPage() {
   const { id } = useParams<{ id: string }>()
 
@@ -118,7 +149,23 @@ export function BikeDetailPage() {
           </span>
         )}
       </div>
-      <div style={{ fontSize: 13, color: '#64748b' }}>Type : {bike?.vehicle_type_id ?? '—'}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 13, color: '#64748b' }}>Type : {bike?.vehicle_type_id ?? '—'}</div>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          {([24, 36] as const).map(h => (
+            <button
+              key={h}
+              onClick={() => downloadRawHistory(id!, h)}
+              style={{
+                background: '#1e293b', border: '1px solid #334155', borderRadius: 6,
+                color: '#94a3b8', cursor: 'pointer', fontSize: 12, padding: '5px 12px',
+              }}
+            >
+              ↓ Données brutes {h}h
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Current state */}
       {bike?.current_battery_pct != null && (
