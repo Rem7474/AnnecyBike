@@ -13,6 +13,21 @@ import (
 func GetPhysicalBikes(pool *db.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rows, err := pool.Query(c.Request.Context(), `
+			WITH current_state AS (
+				SELECT DISTINCT ON (b.physical_bike_id)
+					b.physical_bike_id,
+					b.bike_id AS current_bike_id,
+					st.name   AS current_station_name
+				FROM bikes b
+				LEFT JOIN LATERAL (
+					SELECT station_id FROM bike_snapshots
+					WHERE bike_id = b.bike_id
+					ORDER BY time DESC LIMIT 1
+				) bs ON true
+				LEFT JOIN stations st ON st.station_id = bs.station_id
+				WHERE b.physical_bike_id IS NOT NULL
+				ORDER BY b.physical_bike_id, b.last_seen DESC
+			)
 			SELECT
 				pb.id,
 				pb.vehicle_type_id,
@@ -20,13 +35,17 @@ func GetPhysicalBikes(pool *db.Pool) gin.HandlerFunc {
 				pb.custom_name,
 				pb.first_seen,
 				pb.last_seen,
-				COUNT(DISTINCT t.id)     AS total_trips,
+				COUNT(DISTINCT t.id)                          AS total_trips,
 				COALESCE(SUM(t.distance_meters), 0) / 1000.0 AS total_distance_km,
-				COUNT(DISTINCT bk.bike_id) AS bike_id_count
+				COUNT(DISTINCT bk.bike_id)                    AS bike_id_count,
+				cs.current_bike_id,
+				cs.current_station_name
 			FROM physical_bikes pb
-			LEFT JOIN trips t  ON t.physical_bike_id  = pb.id
-			LEFT JOIN bikes bk ON bk.physical_bike_id = pb.id
-			GROUP BY pb.id, pb.vehicle_type_id, pb.fleet_number, pb.custom_name, pb.first_seen, pb.last_seen
+			LEFT JOIN trips t         ON t.physical_bike_id  = pb.id
+			LEFT JOIN bikes bk        ON bk.physical_bike_id = pb.id
+			LEFT JOIN current_state cs ON cs.physical_bike_id = pb.id
+			GROUP BY pb.id, pb.vehicle_type_id, pb.fleet_number, pb.custom_name,
+			         pb.first_seen, pb.last_seen, cs.current_bike_id, cs.current_station_name
 			ORDER BY pb.last_seen DESC
 			LIMIT 500
 		`)
@@ -41,7 +60,8 @@ func GetPhysicalBikes(pool *db.Pool) gin.HandlerFunc {
 			var b models.PhysicalBike
 			var idCount int
 			if err := rows.Scan(&b.ID, &b.VehicleTypeID, &b.FleetNumber, &b.CustomName,
-				&b.FirstSeen, &b.LastSeen, &b.TotalTrips, &b.TotalDistanceKm, &idCount); err != nil {
+				&b.FirstSeen, &b.LastSeen, &b.TotalTrips, &b.TotalDistanceKm, &idCount,
+				&b.CurrentBikeID, &b.CurrentStationName); err != nil {
 				continue
 			}
 			b.IDCount = &idCount

@@ -52,7 +52,7 @@ const S: Record<string, CSSProperties> = {
   },
 }
 
-type SortKey = 'fleet_number' | 'total_trips' | 'total_distance_km' | 'last_seen' | 'id_count'
+type SortKey = 'fleet_number' | 'total_trips' | 'total_distance_km' | 'last_seen' | 'id_count' | 'current_station_name'
 
 function relativeTime(iso: string) {
   const diff = Date.now() - new Date(iso).getTime()
@@ -103,7 +103,9 @@ export function PhysicalBikeListPage() {
       (b.fleet_number ?? '').toLowerCase().includes(q) ||
       (b.custom_name ?? '').toLowerCase().includes(q) ||
       String(b.id).padStart(6, '0').includes(q) ||
-      b.vehicle_type_id.toLowerCase().includes(q)
+      b.vehicle_type_id.toLowerCase().includes(q) ||
+      (b.current_station_name ?? '').toLowerCase().includes(q) ||
+      (b.current_bike_id ?? '').toLowerCase().includes(q)
     )
   }, [bikes, search])
 
@@ -117,8 +119,9 @@ export function PhysicalBikeListPage() {
           break
         case 'total_trips':      av = a.total_trips; bv = b.total_trips; break
         case 'total_distance_km': av = a.total_distance_km; bv = b.total_distance_km; break
-        case 'id_count':         av = a.id_count ?? 0; bv = b.id_count ?? 0; break
-        default:                 av = a.last_seen; bv = b.last_seen; break
+        case 'id_count':              av = a.id_count ?? 0; bv = b.id_count ?? 0; break
+        case 'current_station_name':  av = a.current_station_name ?? ''; bv = b.current_station_name ?? ''; break
+        default:                      av = a.last_seen; bv = b.last_seen; break
       }
       if (av < bv) return sortDesc ? 1 : -1
       if (av > bv) return sortDesc ? -1 : 1
@@ -202,6 +205,9 @@ export function PhysicalBikeListPage() {
               <th style={thStyle('id_count')} onClick={() => toggleSort('id_count')}>
                 IDs GBFS{sortArrow('id_count')}
               </th>
+              <th style={thStyle('current_station_name')} onClick={() => toggleSort('current_station_name')}>
+                Localisation{sortArrow('current_station_name')}
+              </th>
               <th style={thStyle('last_seen')} onClick={() => toggleSort('last_seen')}>
                 Vu{sortArrow('last_seen')}
               </th>
@@ -258,6 +264,15 @@ export function PhysicalBikeListPage() {
                   <td style={S.td}>{b.total_trips}</td>
                   <td style={S.td}>{b.total_distance_km.toFixed(1)} km</td>
                   <td style={{ ...S.td, color: '#64748b' }}>{b.id_count ?? 0}</td>
+                  <td style={{ ...S.td, fontSize: 12 }}>
+                    {b.current_station_name ? (
+                      <span style={{ color: '#34d399' }}>{b.current_station_name}</span>
+                    ) : b.current_bike_id ? (
+                      <span style={{ color: '#fbbf24' }}>En transit</span>
+                    ) : (
+                      <span style={{ color: '#475569' }}>—</span>
+                    )}
+                  </td>
                   <td style={{ ...S.td, color: '#64748b', fontSize: 12 }}>{relativeTime(b.last_seen)}</td>
 
                   {/* Actions */}
@@ -284,7 +299,7 @@ export function PhysicalBikeListPage() {
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={8} style={{ ...S.td, color: '#64748b', textAlign: 'center', padding: 32 }}>
+                <td colSpan={9} style={{ ...S.td, color: '#64748b', textAlign: 'center', padding: 32 }}>
                   {search ? 'Aucun résultat pour cette recherche.' : 'Aucun vélo physique enregistré.'}
                 </td>
               </tr>
