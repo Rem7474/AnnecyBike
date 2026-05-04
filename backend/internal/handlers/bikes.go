@@ -88,7 +88,7 @@ func GetBike(pool *db.Pool) gin.HandlerFunc {
 			snapshotTime *time.Time
 		)
 		err := pool.QueryRow(c.Request.Context(), `
-			SELECT b.bike_id, b.vehicle_type_id, b.first_seen, b.last_seen,
+			SELECT b.bike_id, b.vehicle_type_id, b.first_seen, b.last_seen, b.physical_bike_id,
 				s.current_range_meters, s.lat, s.lon, s.station_id, s.is_disabled, s.time,
 				st.name
 			FROM bikes b
@@ -101,7 +101,7 @@ func GetBike(pool *db.Pool) gin.HandlerFunc {
 			LEFT JOIN stations st ON st.station_id = s.station_id
 			WHERE b.bike_id = $1
 		`, bikeID).Scan(
-			&b.BikeID, &b.VehicleTypeID, &b.FirstSeen, &b.LastSeen,
+			&b.BikeID, &b.VehicleTypeID, &b.FirstSeen, &b.LastSeen, &b.PhysicalBikeID,
 			&rangeMeters, &lat, &lon, &stationID, &isDisabled, &snapshotTime, &stationName,
 		)
 		if err != nil {

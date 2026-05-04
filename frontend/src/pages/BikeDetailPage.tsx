@@ -1,16 +1,18 @@
+import { CSSProperties } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import {
-  LineChart, Line, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, CartesianGrid, ReferenceLine,
-} from 'recharts'
 import { MapContainer, TileLayer, Polyline, CircleMarker, Popup } from 'react-leaflet'
 import { api } from '../api'
+import type { BikeSnapshot } from '../types'
 
-const S: Record<string, React.CSSProperties> = {
-  page: { padding: 24, maxWidth: 1100, margin: '0 auto' },
+const S: Record<string, CSSProperties> = {
+  page: { padding: 24, maxWidth: 900, margin: '0 auto' },
   back: { color: '#94a3b8', textDecoration: 'none', fontSize: 13 },
   title: { fontSize: 22, fontWeight: 700, margin: '12px 0 4px' },
+  notice: {
+    background: '#1e293b', border: '1px solid #334155', borderRadius: 8,
+    padding: '10px 16px', fontSize: 12, color: '#64748b', marginBottom: 20,
+  },
   cards: { display: 'flex', gap: 12, flexWrap: 'wrap', margin: '16px 0' },
   card: { background: '#1e293b', borderRadius: 8, padding: '12px 20px', minWidth: 140 },
   cardLabel: { fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1 },
@@ -22,71 +24,19 @@ const S: Record<string, React.CSSProperties> = {
   td: { padding: '8px 10px', borderBottom: '1px solid #1e293b' },
 }
 
-function healthColor(score: number) {
-  if (score >= 70) return '#22c55e'
-  if (score >= 40) return '#f97316'
-  return '#ef4444'
-}
-
 function batteryColor(pct: number) {
-  if (pct >= 60) return '#22c55e'
-  if (pct >= 30) return '#f97316'
+  if (pct >= 50) return '#22c55e'
+  if (pct >= 20) return '#f97316'
   return '#ef4444'
-}
-
-function fmt(n?: number, unit = '') {
-  if (n === undefined || n === null) return '—'
-  return `${Math.round(n)}${unit}`
-}
-
-async function downloadRawHistory(id: string, hours: number) {
-  const to = new Date()
-  const from = new Date(to.getTime() - hours * 3600_000)
-  const p = new URLSearchParams({ resolution: 'raw', from: from.toISOString(), to: to.toISOString() })
-  const res = await fetch(`/api/v1/bikes/${id}/history?${p}`)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const snapshots: { time: string; bike_id: string; lat: number; lon: number; station_id: string | null; is_disabled: boolean; current_range_meters: number }[] = await res.json()
-
-  const header = 'time,bike_id,lat,lon,station_id,is_disabled,current_range_meters,battery_pct'
-  const rows = snapshots.map(s =>
-    [
-      s.time,
-      s.bike_id,
-      s.lat,
-      s.lon,
-      s.station_id ?? '',
-      s.is_disabled,
-      s.current_range_meters,
-      Math.round((s.current_range_meters / 45000) * 100),
-    ].join(',')
-  )
-  const csv = [header, ...rows].join('\n')
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `bike_${id.slice(0, 8)}_raw_${hours}h.csv`
-  a.click()
-  URL.revokeObjectURL(url)
 }
 
 export function BikeDetailPage() {
   const { id } = useParams<{ id: string }>()
 
   const { data: bike } = useQuery({ queryKey: ['bike', id], queryFn: () => api.bikes.get(id!) })
-  const { data: stats } = useQuery({ queryKey: ['bike-stats', id], queryFn: () => api.bikes.stats(id!) })
-  const { data: health } = useQuery({ queryKey: ['bike-health', id], queryFn: () => api.bikes.health(id!) })
-  const { data: trips } = useQuery({ queryKey: ['bike-trips', id], queryFn: () => api.bikes.trips(id!, 20) })
-  const { data: history } = useQuery({
-    queryKey: ['bike-history', id, '7d'],
-    queryFn: () => {
-      const to = new Date().toISOString()
-      const from = new Date(Date.now() - 7 * 86400_000).toISOString()
-      return api.bikes.history(id!, from, to, '1h')
-    },
-  })
+  const { data: trips } = useQuery({ queryKey: ['bike-trips', id], queryFn: () => api.bikes.trips(id!, 5) })
 
-  // Last 24h raw history for trajectory map
+  // Current session GPS track (raw, 24h) — also used for live state
   const { data: trajectory } = useQuery({
     queryKey: ['bike-trajectory', id],
     queryFn: () => {
@@ -96,226 +46,96 @@ export function BikeDetailPage() {
     },
   })
 
-  const chartData = (history ?? []).map((s) => ({
-    time: new Date(s.time).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit' }),
-    battery: Math.round((s.current_range_meters / 45000) * 100),
-  })).reverse()
+  const trajectoryPoints = (trajectory ?? [])
+    .filter((s: BikeSnapshot) => s.station_id === null && s.lat !== 0 && s.lon !== 0)
+    .map((s: BikeSnapshot) => [s.lat, s.lon] as [number, number])
+    .reverse()
 
-  // Build trajectory polyline segments: each continuous free-floating period
-  // becomes its own segment, so we don't draw phantom lines between separate trips.
-  // Points at (0,0) are skipped: providers that only update GPS inside station
-  // geofences emit null-island coordinates while a bike is in motion.
-  const trajectorySegments: [number, number][][] = []
-  {
-    let seg: [number, number][] = []
-    // trajectory arrives newest-first; reverse to walk chronologically
-    for (const s of (trajectory ?? []).slice().reverse()) {
-      if (s.station_id === null) {
-        if (s.lat !== 0 || s.lon !== 0) seg.push([s.lat, s.lon])
-      } else {
-        if (seg.length > 1) trajectorySegments.push(seg)
-        seg = []
-      }
-    }
-    if (seg.length > 1) trajectorySegments.push(seg)
-  }
-  const hasNoGpsData = (trajectory ?? []).filter(s => s.station_id === null).every(s => s.lat === 0 && s.lon === 0)
+  // Latest snapshot for current battery/status
+  const latestSnapshot: BikeSnapshot | null =
+    trajectory && trajectory.length > 0 ? trajectory[trajectory.length - 1] : null
 
-  const tripLines = (trips ?? [])
-    .filter((t) => t.start_lat !== 0 && t.start_lon !== 0 && t.end_lat !== 0 && t.end_lon !== 0)
-    .map((t) => ({
-      id: t.id,
-      path: [[t.start_lat, t.start_lon], [t.end_lat, t.end_lon]] as [number, number][],
-      battery: t.battery_delta,
-    }))
+  const batteryPct = latestSnapshot
+    ? Math.round((latestSnapshot.current_range_meters / 45000) * 100)
+    : (bike?.current_battery_pct ?? null)
 
-  const mapCenter: [number, number] = trajectorySegments[0]?.[0]
-    ?? tripLines[0]?.path[0]
-    ?? [45.899, 6.129]
+  const isDisabled = latestSnapshot?.is_disabled ?? bike?.is_currently_disabled ?? false
+  const autonomyKm = latestSnapshot
+    ? Math.round(latestSnapshot.current_range_meters / 1000)
+    : batteryPct !== null ? Math.round((batteryPct / 100) * 45) : null
+
+  const mapCenter: [number, number] = trajectoryPoints[0] ?? [45.899, 6.129]
 
   return (
     <div style={S.page}>
       <Link to="/" style={S.back}>← Retour à la carte</Link>
       <div style={S.title}>
         Vélo <code style={{ fontSize: 16, color: '#38bdf8' }}>{id?.slice(0, 8)}…</code>
-        {health && (
-          <span style={{
-            marginLeft: 12, fontSize: 14, fontWeight: 700,
-            color: healthColor(health.health_score),
-            background: '#1e293b', borderRadius: 6,
-            padding: '3px 10px', verticalAlign: 'middle',
-          }}>
-            ❤ {health.health_score}/100 — {health.label}
-          </span>
-        )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 13, color: '#64748b' }}>Type : {bike?.vehicle_type_id ?? '—'}</div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          {([24, 36] as const).map(h => (
-            <button
-              key={h}
-              onClick={() => downloadRawHistory(id!, h)}
-              style={{
-                background: '#1e293b', border: '1px solid #334155', borderRadius: 6,
-                color: '#94a3b8', cursor: 'pointer', fontSize: 12, padding: '5px 12px',
-              }}
-            >
-              ↓ Données brutes {h}h
-            </button>
-          ))}
+      <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
+        Type : {bike?.vehicle_type_id ?? '—'}
+      </div>
+
+      <div style={S.notice}>
+        ⚠ Les identifiants vélo sont temporaires (rotation après chaque trajet, spec GBFS v2.0).
+        Cette page affiche uniquement la <strong>session courante</strong> — l'historique complet
+        est consultable par station.
+      </div>
+
+      {bike?.physical_bike_id && (
+        <div style={{ marginBottom: 16 }}>
+          <Link to={`/physical-bikes/${bike.physical_bike_id}`} style={{ color: '#38bdf8', fontSize: 13 }}>
+            → Voir l'historique complet du vélo physique #{bike.physical_bike_id}
+          </Link>
         </div>
-      </div>
+      )}
 
       {/* Current state */}
-      {bike?.current_battery_pct != null && (
-        <div style={{ background: '#1e293b', borderRadius: 8, padding: '12px 20px', marginTop: 12, display: 'flex', gap: 32, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1 }}>Batterie</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-              <div style={{ width: 80, height: 10, borderRadius: 4, background: '#0f172a', border: '1px solid #334155', overflow: 'hidden' }}>
-                <div style={{ width: `${bike.current_battery_pct}%`, height: '100%', background: batteryColor(bike.current_battery_pct), borderRadius: 4 }} />
-              </div>
-              <span style={{ color: batteryColor(bike.current_battery_pct), fontWeight: 700, fontSize: 15 }}>
-                {bike.current_battery_pct}%
-              </span>
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1 }}>Emplacement</div>
-            <div style={{ fontSize: 13, marginTop: 6 }}>
-              {bike.current_station_name
-                ? <span style={{ color: '#22c55e' }}>● {bike.current_station_name}</span>
-                : <span style={{ color: '#f97316' }}>● En déplacement ({bike.current_lat?.toFixed(4)}, {bike.current_lon?.toFixed(4)})</span>
-              }
-            </div>
-          </div>
-          {bike.is_currently_disabled && (
-            <div style={{ fontSize: 13, color: '#ef4444', fontWeight: 600 }}>⚠ Hors service</div>
-          )}
-          {bike.last_snapshot_time && (
-            <div style={{ marginLeft: 'auto' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1 }}>Dernière MAJ</div>
-              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 6 }}>
-                {new Date(bike.last_snapshot_time).toLocaleString('fr-FR')}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Health score breakdown */}
-      {health && (
-        <div style={{ ...S.cards, marginTop: 12 }}>
-          <div style={{ ...S.card, borderLeft: `4px solid ${healthColor(health.health_score)}` }}>
-            <div style={S.cardLabel}>Score global</div>
-            <div style={{ ...S.cardValue, color: healthColor(health.health_score) }}>{health.health_score}/100</div>
-          </div>
-          <div style={S.card}>
-            <div style={S.cardLabel}>Batterie (×0.4)</div>
-            <div style={S.cardValue}>{health.battery_score}/40</div>
-          </div>
-          <div style={S.card}>
-            <div style={S.cardLabel}>Fiabilité (30j)</div>
-            <div style={S.cardValue}>{health.reliability_score}/30</div>
-          </div>
-          <div style={S.card}>
-            <div style={S.cardLabel}>Activité (30j)</div>
-            <div style={S.cardValue}>{health.activity_score}/30</div>
-          </div>
-          <div style={S.card}>
-            <div style={S.cardLabel}>Incidents hors-service</div>
-            <div style={{ ...S.cardValue, color: health.disabled_count_30d > 3 ? '#ef4444' : '#f1f5f9' }}>
-              {health.disabled_count_30d}j
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Usage stats */}
       <div style={S.cards}>
-        <div style={S.card}>
-          <div style={S.cardLabel}>Trajets totaux</div>
-          <div style={S.cardValue}>{stats?.total_trips ?? '—'}</div>
-        </div>
-        <div style={S.card}>
-          <div style={S.cardLabel}>Distance totale</div>
-          <div style={S.cardValue}>{fmt(stats?.total_distance_km)} km</div>
-        </div>
-        <div style={S.card}>
-          <div style={S.cardLabel}>Batterie moy. (7j)</div>
-          <div style={S.cardValue}>{fmt(stats?.avg_battery_pct)}%</div>
-        </div>
-        <div style={S.card}>
-          <div style={S.cardLabel}>Disponibilité</div>
-          <div style={S.cardValue}>{fmt(stats?.availability_pct)}%</div>
-        </div>
-      </div>
-
-      {/* Battery chart + trajectory map side by side */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 24 }}>
-        <div>
-          <div style={S.sectionTitle}>Batterie — 7 derniers jours</div>
-          <div style={{ background: '#1e293b', borderRadius: 8, padding: 16 }}>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="time" tick={{ fill: '#64748b', fontSize: 9 }} interval="preserveStartEnd" />
-                <YAxis domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 11 }} unit="%" />
-                <ReferenceLine y={20} stroke="#ef4444" strokeDasharray="4 2" label={{ value: '20%', fill: '#ef4444', fontSize: 10 }} />
-                <Tooltip
-                  contentStyle={{ background: '#0f172a', border: '1px solid #334155' }}
-                  formatter={(v: number) => [`${v}%`, 'Batterie']}
-                />
-                <Line type="monotone" dataKey="battery" stroke="#38bdf8" dot={false} strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
+        <div style={{ ...S.card, borderLeft: `4px solid ${batteryColor(batteryPct ?? 0)}` }}>
+          <div style={S.cardLabel}>Batterie</div>
+          <div style={{ ...S.cardValue, color: batteryColor(batteryPct ?? 0) }}>
+            {batteryPct !== null ? `${batteryPct}%` : '—'}
           </div>
         </div>
-
-        <div>
-          <div style={S.sectionTitle}>Trajectoires — 24 dernières heures</div>
-          {hasNoGpsData && (trajectory ?? []).length > 0 && (
-            <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>
-              ⚠ Le provider GBFS ne publie pas le GPS en temps réel — position uniquement mise à jour aux stations (geofences). Les trajets A→B sont affichés en pointillés.
-            </div>
-          )}
-          <div style={{ borderRadius: 8, overflow: 'hidden', height: 232 }}>
-            <MapContainer center={mapCenter} zoom={13} style={{ height: '100%' }} zoomControl={false}>
-              <TileLayer
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                attribution=""
-              />
-              {/* Free-floating path — one Polyline per continuous segment */}
-              {trajectorySegments.map((seg, i) => (
-                <Polyline key={i} positions={seg} pathOptions={{ color: '#38bdf8', weight: 2 }} />
-              ))}
-              {/* Trip start/end lines */}
-              {tripLines.map((t) => (
-                <Polyline
-                  key={t.id}
-                  positions={t.path}
-                  pathOptions={{
-                    color: (t.battery ?? 0) < -5000 ? '#f97316' : '#22c55e',
-                    weight: 2, dashArray: '5 3',
-                  }}
-                />
-              ))}
-              {/* Start markers */}
-              {tripLines.map((t) => (
-                <CircleMarker key={`s-${t.id}`} center={t.path[0]} radius={4}
-                  pathOptions={{ color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1 }}>
-                  <Popup>Départ trajet #{t.id}</Popup>
-                </CircleMarker>
-              ))}
-            </MapContainer>
+        <div style={S.card}>
+          <div style={S.cardLabel}>Statut</div>
+          <div style={{ ...S.cardValue, fontSize: 16, marginTop: 8 }}>
+            {isDisabled
+              ? <span style={{ color: '#ef4444' }}>Hors service</span>
+              : <span style={{ color: '#22c55e' }}>Disponible</span>}
+          </div>
+        </div>
+        <div style={S.card}>
+          <div style={S.cardLabel}>Autonomie</div>
+          <div style={S.cardValue}>
+            {autonomyKm !== null ? `${autonomyKm} km` : '—'}
           </div>
         </div>
       </div>
 
-      {/* Trips table */}
+      {/* Trajectory map */}
       <div style={S.section}>
-        <div style={S.sectionTitle}>Derniers trajets</div>
+        <div style={S.sectionTitle}>Trajectoire (session courante)</div>
+        <div style={{ borderRadius: 8, overflow: 'hidden', height: 300 }}>
+          <MapContainer center={mapCenter} zoom={14} style={{ height: '100%' }} zoomControl={false}>
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="" />
+            {trajectoryPoints.length > 1 && (
+              <Polyline positions={trajectoryPoints} pathOptions={{ color: '#38bdf8', weight: 2 }} />
+            )}
+            {trajectoryPoints.length > 0 && (
+              <CircleMarker center={trajectoryPoints[trajectoryPoints.length - 1]} radius={5}
+                pathOptions={{ color: '#38bdf8', fillColor: '#38bdf8', fillOpacity: 1 }}>
+                <Popup>Dernière position connue</Popup>
+              </CircleMarker>
+            )}
+          </MapContainer>
+        </div>
+      </div>
+
+      {/* Trips this session */}
+      <div style={S.section}>
+        <div style={S.sectionTitle}>Trajets (session courante)</div>
         <table style={S.table}>
           <thead>
             <tr>
@@ -330,20 +150,20 @@ export function BikeDetailPage() {
             {(trips ?? []).map((t) => (
               <tr key={t.id}>
                 <td style={S.td}>{new Date(t.start_time).toLocaleString('fr-FR')}</td>
-                <td style={S.td}>{fmt(t.duration_minutes)} min</td>
+                <td style={S.td}>{t.duration_minutes != null ? `${Math.round(t.duration_minutes)} min` : '—'}</td>
                 <td style={S.td}>{t.distance_meters != null ? `${(t.distance_meters / 1000).toFixed(1)} km` : '—'}</td>
                 <td style={S.td}>
-                  {t.battery_delta !== undefined
-                    ? `${t.battery_delta <= 0 ? '−' : '+'}${Math.round((Math.abs(t.battery_delta) / 45000) * 100)}%`
+                  {t.battery_delta != null
+                    ? <span style={{ color: '#f97316' }}>−{Math.round((Math.abs(t.battery_delta) / 45000) * 100)}%</span>
                     : '—'}
                 </td>
-                <td style={{ ...S.td, fontSize: 11, color: '#64748b' }}>
-                  {t.start_station_name ?? t.start_station_id?.slice(0, 8) ?? '—'} → {t.end_station_name ?? t.end_station_id?.slice(0, 8) ?? 'Libre'}
+                <td style={{ ...S.td, fontSize: 12, color: '#64748b' }}>
+                  {t.start_station_name ?? '?'} → {t.end_station_name ?? '?'}
                 </td>
               </tr>
             ))}
             {(trips ?? []).length === 0 && (
-              <tr><td style={S.td} colSpan={5}>Aucun trajet enregistré</td></tr>
+              <tr><td colSpan={5} style={{ ...S.td, color: '#64748b' }}>Aucun trajet pour cette session</td></tr>
             )}
           </tbody>
         </table>

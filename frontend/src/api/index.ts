@@ -1,7 +1,7 @@
 import type {
   Anomaly, Bike, BikeLive, BikeHealth, BikeSnapshot, BikeStats,
   BusiestStation, BatteryBucket, DailyCount, FleetStats,
-  GeoJsonFeatureCollection, HeatPoint, NearestBike, NearestStation, ReplayBucket,
+  GeoJsonFeatureCollection, HeatPoint, NearestBike, NearestStation, PhysicalBike, ReplayBucket,
   Station, StationBike, StationBikeVisit, Trip,
 } from '../types'
 
@@ -9,6 +9,16 @@ const BASE = '/api/v1'
 
 async function get<T>(url: string): Promise<T> {
   const res = await fetch(url)
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`)
+  return res.json()
+}
+
+async function patch<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`)
   return res.json()
 }
@@ -47,6 +57,22 @@ export const api = {
       get<NearestStation[]>(`${BASE}/stations/nearest?lat=${lat}&lon=${lon}&limit=${limit}`),
     bikeHistory: (id: string, hours = 48) =>
       get<StationBikeVisit[]>(`${BASE}/stations/${id}/bike-history?hours=${hours}`),
+  },
+  physicalBikes: {
+    list: () => get<PhysicalBike[]>(`${BASE}/physical-bikes`),
+    get: (id: number) => get<PhysicalBike>(`${BASE}/physical-bikes/${id}`),
+    update: (id: number, body: { fleet_number: string | null; custom_name: string | null }) =>
+      patch<{ ok: boolean }>(`${BASE}/physical-bikes/${id}`, body),
+    reassign: (bikeId: string, physicalBikeId: number) =>
+      patch<{ ok: boolean }>(`${BASE}/bikes/${bikeId}/reassign`, { physical_bike_id: physicalBikeId }),
+    trips: (id: number, limit = 50, offset = 0) =>
+      get<Trip[]>(`${BASE}/physical-bikes/${id}/trips?limit=${limit}&offset=${offset}`),
+    history: (id: number, from?: string, to?: string) => {
+      const p = new URLSearchParams()
+      if (from) p.set('from', from)
+      if (to) p.set('to', to)
+      return get<BikeSnapshot[]>(`${BASE}/physical-bikes/${id}/history?${p}`)
+    },
   },
   trips: {
     list: (params: { bike_id?: string; station_id?: string; from?: string; to?: string; limit?: number }) => {

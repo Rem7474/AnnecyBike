@@ -25,6 +25,7 @@ export interface Bike {
   vehicle_type_id: string
   first_seen: string
   last_seen: string
+  physical_bike_id?: number
   current_battery_pct?: number
   current_lat?: number
   current_lon?: number
@@ -32,6 +33,22 @@ export interface Bike {
   current_station_name?: string
   is_currently_disabled?: boolean
   last_snapshot_time?: string
+}
+
+export interface PhysicalBike {
+  id: number
+  vehicle_type_id: string
+  fleet_number?: string
+  custom_name?: string
+  first_seen: string
+  last_seen: string
+  total_trips: number
+  total_distance_km: number
+  current_battery_pct?: number
+  current_station_name?: string
+  is_currently_disabled?: boolean
+  current_bike_id?: string
+  known_bike_ids?: string[]
 }
 
 export interface BikeLive {

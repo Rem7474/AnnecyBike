@@ -12,12 +12,13 @@ import (
 )
 
 type BikeState struct {
-	StationID  *string
-	Lat        float64
-	Lon        float64
-	Battery    int
-	IsDisabled bool
-	SeenAt     time.Time
+	VehicleTypeID string  // needed when creating a new physical_bike
+	StationID     *string
+	Lat           float64
+	Lon           float64
+	Battery       int
+	IsDisabled    bool
+	SeenAt        time.Time
 }
 
 // pendingClose holds an arrival observation that is buffered for one poll.
@@ -42,17 +43,19 @@ type openTrip struct {
 
 // Detector maintains per-bike state across poll cycles and derives trips.
 type Detector struct {
-	lastState map[string]BikeState
-	openTrips map[string]openTrip
-	db        *db.Pool
-	matrix    *routing.Matrix // nil until SetMatrix is called; haversine fallback used
+	lastState   map[string]BikeState
+	openTrips   map[string]openTrip
+	physicalIDs map[string]int64 // bike_id → physical_bike_id (in-memory, persisted via DB)
+	db          *db.Pool
+	matrix      *routing.Matrix // nil until SetMatrix is called; haversine fallback used
 }
 
 func NewDetector(pool *db.Pool) *Detector {
 	return &Detector{
-		lastState: make(map[string]BikeState),
-		openTrips: make(map[string]openTrip),
-		db:        pool,
+		lastState:   make(map[string]BikeState),
+		openTrips:   make(map[string]openTrip),
+		physicalIDs: make(map[string]int64),
+		db:          pool,
 	}
 }
 
@@ -77,7 +80,13 @@ func (d *Detector) HydrateState(ctx context.Context) error {
 			SeenAt:     row.SeenAt,
 		}
 	}
-	slog.Info("detector state hydrated", "bikes", len(rows))
+	physIDs, err2 := d.db.FetchBikePhysicalIDs(ctx)
+	if err2 == nil {
+		for bikeID, pid := range physIDs {
+			d.physicalIDs[bikeID] = pid
+		}
+	}
+	slog.Info("detector state hydrated", "bikes", len(rows), "physical_ids", len(d.physicalIDs))
 	return nil
 }
 
@@ -96,7 +105,17 @@ func (d *Detector) Process(ctx context.Context, now time.Time, current map[strin
 			// Unknown bike_id: either a new deployment or a post-trip ID rotation.
 			// If it appears directly at a station it is likely a rotated return.
 			if cur.StationID != nil && !cur.IsDisabled {
-				d.tryMatchArrival(ctx, now, cur)
+				d.tryMatchArrival(ctx, now, bikeID, cur)
+			}
+			// Assign physical bike ID if not yet matched
+			if _, hasID := d.physicalIDs[bikeID]; !hasID {
+				pid, err := d.db.CreatePhysicalBike(ctx, cur.VehicleTypeID)
+				if err == nil {
+					d.physicalIDs[bikeID] = pid
+					_ = d.db.LinkBikeToPhysical(ctx, bikeID, pid)
+				} else {
+					slog.Warn("create physical bike failed", "bike", bikeID, "err", err)
+				}
 			}
 			d.lastState[bikeID] = cur
 			continue
@@ -227,7 +246,7 @@ func (d *Detector) Process(ctx context.Context, now time.Time, current map[strin
 // closest to 15 km/h average (the most likely speed) is chosen.
 // If no candidate falls within the window, the arrival is ignored — it may be a
 // freshly-deployed bike or a GBFS echo; the open trips will close via 2-hour timeout.
-func (d *Detector) tryMatchArrival(ctx context.Context, now time.Time, arrived BikeState) {
+func (d *Detector) tryMatchArrival(ctx context.Context, now time.Time, newBikeID string, arrived BikeState) {
 	var bestKey string
 	var bestScore time.Duration
 
@@ -237,6 +256,12 @@ func (d *Detector) tryMatchArrival(ctx context.Context, now time.Time, arrived B
 		}
 		if sameStation(ot.startStationID, arrived.StationID) {
 			continue // same-station returns handled by pendingClose path
+		}
+
+		// Hard constraint: battery cannot increase during a ride (no in-trip charging).
+		// Allow a small tolerance (500 m-range) for sensor noise.
+		if arrived.Battery > ot.batteryStart+500 {
+			continue
 		}
 
 		elapsed := now.Sub(ot.startTime)
@@ -278,10 +303,18 @@ func (d *Detector) tryMatchArrival(ctx context.Context, now time.Time, arrived B
 	ot := d.openTrips[bestKey]
 	slog.Info("trip matched via ID rotation",
 		"old_bike", bestKey,
+		"new_bike", newBikeID,
 		"new_bike_station", stationStr(arrived.StationID),
 		"elapsed", now.Sub(ot.startTime).Round(time.Second),
 		"score", bestScore.Round(time.Second),
 	)
+
+	// Inherit physical bike ID: new bike_id is the same physical bike
+	if pid, ok := d.physicalIDs[bestKey]; ok {
+		d.physicalIDs[newBikeID] = pid
+		_ = d.db.LinkBikeToPhysical(ctx, newBikeID, pid)
+	}
+
 	d.closeTrip(ctx, bestKey, ot, now, arrived)
 	delete(d.openTrips, bestKey)
 }
@@ -409,8 +442,14 @@ func (d *Detector) closeTrip(ctx context.Context, bikeID string, ot openTrip, en
 		return
 	}
 
+	var physicalID *int64
+	if pid, ok := d.physicalIDs[bikeID]; ok {
+		physicalID = &pid
+	}
+
 	err := d.db.InsertTrip(ctx,
 		bikeID,
+		physicalID,
 		ot.startTime, endTime,
 		ot.startStationID, endState.StationID,
 		ot.startLat, ot.startLon,

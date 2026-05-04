@@ -25,11 +25,21 @@ CREATE TABLE IF NOT EXISTS stations (
     last_updated            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS bikes (
-    bike_id         TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS physical_bikes (
+    id              BIGSERIAL PRIMARY KEY,
     vehicle_type_id TEXT REFERENCES vehicle_types(vehicle_type_id),
+    fleet_number    TEXT,                          -- visible number on the physical bike frame
+    custom_name     TEXT,                          -- user-defined label
     first_seen      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_seen       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS bikes (
+    bike_id          TEXT PRIMARY KEY,
+    vehicle_type_id  TEXT REFERENCES vehicle_types(vehicle_type_id),
+    first_seen       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    physical_bike_id BIGINT REFERENCES physical_bikes(id)
 );
 
 -- Geofencing zones (latest snapshot from geofencing_zones.json, single row)
@@ -88,6 +98,7 @@ CREATE INDEX IF NOT EXISTS idx_station_snapshots_station_time
 CREATE TABLE IF NOT EXISTS trips (
     id               BIGSERIAL PRIMARY KEY,
     bike_id          TEXT             NOT NULL,
+    physical_bike_id BIGINT REFERENCES physical_bikes(id),
     start_time       TIMESTAMPTZ      NOT NULL,
     end_time         TIMESTAMPTZ      NOT NULL,
     start_station_id TEXT,
@@ -106,6 +117,8 @@ CREATE INDEX IF NOT EXISTS idx_trips_bike_start ON trips (bike_id, start_time DE
 CREATE INDEX IF NOT EXISTS idx_trips_start_time ON trips (start_time DESC);
 CREATE INDEX IF NOT EXISTS idx_trips_start_station ON trips (start_station_id) WHERE start_station_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_trips_end_station ON trips (end_station_id) WHERE end_station_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_bikes_physical_bike_id ON bikes (physical_bike_id) WHERE physical_bike_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_trips_physical_bike_id ON trips (physical_bike_id) WHERE physical_bike_id IS NOT NULL;
 
 -- ============================================================
 -- Continuous aggregate: daily bike stats

@@ -5,6 +5,7 @@ import { BikeDetailPage } from './pages/BikeDetailPage'
 import { StationDetailPage } from './pages/StationDetailPage'
 import { StatsPage } from './pages/StatsPage'
 import { AnomaliesPage } from './pages/AnomaliesPage'
+import { PhysicalBikeDetailPage } from './pages/PhysicalBikeDetailPage'
 import { api } from './api'
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 2, staleTime: 30_000 } } })
@@ -58,6 +59,7 @@ export function App() {
           <Route path="/stations/:id" element={<StationDetailPage />} />
           <Route path="/stats" element={<StatsPage />} />
           <Route path="/anomalies" element={<AnomaliesPage />} />
+          <Route path="/physical-bikes/:id" element={<PhysicalBikeDetailPage />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

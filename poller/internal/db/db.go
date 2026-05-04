@@ -131,6 +131,7 @@ func (p *Pool) BulkInsertStationSnapshots(ctx context.Context, snapshots []Stati
 // InsertTrip writes a completed trip.
 func (p *Pool) InsertTrip(ctx context.Context,
 	bikeID string,
+	physicalBikeID *int64,
 	startTime, endTime time.Time,
 	startStationID, endStationID *string,
 	startLat, startLon, endLat, endLon float64,
@@ -138,16 +139,64 @@ func (p *Pool) InsertTrip(ctx context.Context,
 ) error {
 	batteryDelta := batteryEnd - batteryStart
 	_, err := p.Exec(ctx, `
-		INSERT INTO trips (bike_id, start_time, end_time,
+		INSERT INTO trips (bike_id, physical_bike_id, start_time, end_time,
 			start_station_id, end_station_id,
 			start_lat, start_lon, end_lat, end_lon,
 			distance_meters, battery_start, battery_end, battery_delta)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-	`, bikeID, startTime, endTime,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+	`, bikeID, physicalBikeID, startTime, endTime,
 		startStationID, endStationID,
 		startLat, startLon, endLat, endLon,
 		distanceMeters, batteryStart, batteryEnd, batteryDelta)
 	return err
+}
+
+// CreatePhysicalBike inserts a new physical_bikes row and returns its ID.
+func (p *Pool) CreatePhysicalBike(ctx context.Context, vehicleTypeID string) (int64, error) {
+	var id int64
+	err := p.Pool.QueryRow(ctx, `
+		INSERT INTO physical_bikes (vehicle_type_id, first_seen, last_seen)
+		VALUES ($1, NOW(), NOW()) RETURNING id
+	`, vehicleTypeID).Scan(&id)
+	return id, err
+}
+
+// LinkBikeToPhysical sets physical_bike_id on a bike_id row (only if not already set).
+func (p *Pool) LinkBikeToPhysical(ctx context.Context, bikeID string, physicalID int64) error {
+	_, err := p.Exec(ctx, `
+		UPDATE bikes SET physical_bike_id = $2
+		WHERE bike_id = $1 AND physical_bike_id IS NULL
+	`, bikeID, physicalID)
+	return err
+}
+
+// UpdatePhysicalBikeLastSeen bumps last_seen on a physical bike.
+func (p *Pool) UpdatePhysicalBikeLastSeen(ctx context.Context, physicalID int64) error {
+	_, err := p.Exec(ctx, `UPDATE physical_bikes SET last_seen = NOW() WHERE id = $1`, physicalID)
+	return err
+}
+
+// FetchBikePhysicalIDs returns a map of bike_id → physical_bike_id for recently active bikes.
+// Used to hydrate the detector's physicalIDs map after a restart.
+func (p *Pool) FetchBikePhysicalIDs(ctx context.Context) (map[string]int64, error) {
+	rows, err := p.Pool.Query(ctx, `
+		SELECT bike_id, physical_bike_id FROM bikes
+		WHERE physical_bike_id IS NOT NULL
+		  AND last_seen > NOW() - INTERVAL '4 hours'
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := make(map[string]int64)
+	for rows.Next() {
+		var bikeID string
+		var pid int64
+		if err := rows.Scan(&bikeID, &pid); err == nil {
+			m[bikeID] = pid
+		}
+	}
+	return m, rows.Err()
 }
 
 // BikeStateRow holds the latest snapshot data for a single bike, used to

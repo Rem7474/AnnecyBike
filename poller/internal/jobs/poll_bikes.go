@@ -76,12 +76,13 @@ func PollBikes(ctx context.Context, client *gbfs.Client, pool *db.Pool, detector
 		})
 
 		currentState[b.BikeID] = trip.BikeState{
-			StationID:  stationID,
-			Lat:        lat,
-			Lon:        lon,
-			Battery:    rangeMeters,
-			IsDisabled: b.IsDisabled,
-			SeenAt:     now,
+			VehicleTypeID: b.VehicleTypeID,
+			StationID:     stationID,
+			Lat:           lat,
+			Lon:           lon,
+			Battery:       rangeMeters,
+			IsDisabled:    b.IsDisabled,
+			SeenAt:        now,
 		}
 	}
 

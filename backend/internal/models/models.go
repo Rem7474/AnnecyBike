@@ -31,10 +31,11 @@ type StationHistory struct {
 }
 
 type Bike struct {
-	BikeID        string    `json:"bike_id"`
-	VehicleTypeID string    `json:"vehicle_type_id"`
-	FirstSeen     time.Time `json:"first_seen"`
-	LastSeen      time.Time `json:"last_seen"`
+	BikeID          string  `json:"bike_id"`
+	VehicleTypeID   string  `json:"vehicle_type_id"`
+	FirstSeen       time.Time `json:"first_seen"`
+	LastSeen        time.Time `json:"last_seen"`
+	PhysicalBikeID  *int64  `json:"physical_bike_id,omitempty"`
 	// Current state — populated by GetBike, absent in list endpoints.
 	CurrentBatteryPct   *int       `json:"current_battery_pct,omitempty"`
 	CurrentLat          *float64   `json:"current_lat,omitempty"`
@@ -43,6 +44,36 @@ type Bike struct {
 	CurrentStationName  *string    `json:"current_station_name,omitempty"`
 	IsCurrentlyDisabled *bool      `json:"is_currently_disabled,omitempty"`
 	LastSnapshotTime    *time.Time `json:"last_snapshot_time,omitempty"`
+}
+
+type PhysicalBike struct {
+	ID              int64     `json:"id"`
+	VehicleTypeID   string    `json:"vehicle_type_id"`
+	FleetNumber     *string   `json:"fleet_number,omitempty"` // visible number on the physical bike
+	CustomName      *string   `json:"custom_name,omitempty"`  // user-defined label
+	FirstSeen       time.Time `json:"first_seen"`
+	LastSeen        time.Time `json:"last_seen"`
+	TotalTrips      int       `json:"total_trips"`
+	TotalDistanceKm float64   `json:"total_distance_km"`
+	// Current state
+	CurrentBatteryPct   *int    `json:"current_battery_pct,omitempty"`
+	CurrentStationName  *string `json:"current_station_name,omitempty"`
+	IsCurrentlyDisabled *bool   `json:"is_currently_disabled,omitempty"`
+	CurrentBikeID       *string `json:"current_bike_id,omitempty"`
+}
+
+type PhysicalBikeDetail struct {
+	PhysicalBike
+	KnownBikeIDs []string `json:"known_bike_ids"`
+}
+
+type UpdatePhysicalBikeRequest struct {
+	FleetNumber *string `json:"fleet_number"`
+	CustomName  *string `json:"custom_name"`
+}
+
+type ReassignBikeRequest struct {
+	PhysicalBikeID int64 `json:"physical_bike_id"`
 }
 
 type BikeSnapshot struct {

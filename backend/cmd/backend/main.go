@@ -64,6 +64,7 @@ func main() {
 		v1.GET("/bikes/:id/trips", handlers.GetBikeTrips(pool))
 		v1.GET("/bikes/:id/stats", handlers.GetBikeStats(pool))
 		v1.GET("/bikes/:id/health", handlers.GetBikeHealth(pool))
+		v1.PATCH("/bikes/:id/reassign", handlers.ReassignBike(pool))
 
 		v1.GET("/stations/live", handlers.GetStationsLive(pool))
 		v1.GET("/stations/nearest", handlers.GetNearestStations(pool))
@@ -71,6 +72,12 @@ func main() {
 		v1.GET("/stations/:id/bikes", handlers.GetStationBikes(pool))
 		v1.GET("/stations/:id/history", handlers.GetStationHistory(pool))
 		v1.GET("/stations/:id/bike-history", handlers.GetStationBikeHistory(pool))
+
+		v1.GET("/physical-bikes", handlers.GetPhysicalBikes(pool))
+		v1.GET("/physical-bikes/:pid", handlers.GetPhysicalBike(pool))
+		v1.PATCH("/physical-bikes/:pid", handlers.UpdatePhysicalBike(pool))
+		v1.GET("/physical-bikes/:pid/trips", handlers.GetPhysicalBikeTrips(pool))
+		v1.GET("/physical-bikes/:pid/history", handlers.GetPhysicalBikeHistory(pool))
 
 		v1.GET("/trips", handlers.GetTrips(pool))
 
@@ -112,7 +119,7 @@ func main() {
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, PATCH, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
