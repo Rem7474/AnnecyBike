@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/annecybike/poller/internal/db"
@@ -31,6 +32,13 @@ func PollBikes(ctx context.Context, client *gbfs.Client, pool *db.Pool, detector
 		return
 	}
 
+	// Station coords used as fallback when a docked bike omits lat/lon (spec allows this).
+	stationCoords, err := pool.QueryStationCoords(ctx)
+	if err != nil {
+		slog.Warn("could not load station coords", "err", err)
+		stationCoords = map[string][2]float64{}
+	}
+
 	snaps := make([]db.BikeSnapshot, 0, len(bikeFeed.Data.Bikes))
 	currentState := make(map[string]trip.BikeState, len(bikeFeed.Data.Bikes))
 
@@ -46,22 +54,32 @@ func PollBikes(ctx context.Context, client *gbfs.Client, pool *db.Pool, detector
 			stationID = &sid
 		}
 
+		// spec: lat/lon are conditional — docked bikes may omit them; fall back to station coords.
+		lat, lon := b.Lat, b.Lon
+		if lat == 0 && lon == 0 && stationID != nil {
+			if coords, ok := stationCoords[*stationID]; ok {
+				lat, lon = coords[0], coords[1]
+			}
+		}
+
+		rangeMeters := int(math.Round(b.CurrentRangeMeters))
+
 		snaps = append(snaps, db.BikeSnapshot{
 			Time:               now,
 			BikeID:             b.BikeID,
-			Lat:                b.Lat,
-			Lon:                b.Lon,
+			Lat:                lat,
+			Lon:                lon,
 			StationID:          stationID,
 			IsReserved:         b.IsReserved,
 			IsDisabled:         b.IsDisabled,
-			CurrentRangeMeters: b.CurrentRangeMeters,
+			CurrentRangeMeters: rangeMeters,
 		})
 
 		currentState[b.BikeID] = trip.BikeState{
 			StationID:  stationID,
-			Lat:        b.Lat,
-			Lon:        b.Lon,
-			Battery:    b.CurrentRangeMeters,
+			Lat:        lat,
+			Lon:        lon,
+			Battery:    rangeMeters,
 			IsDisabled: b.IsDisabled,
 			SeenAt:     now,
 		}

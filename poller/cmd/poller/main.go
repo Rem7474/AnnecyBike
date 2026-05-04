@@ -12,6 +12,7 @@ import (
 	"github.com/annecybike/poller/internal/db"
 	"github.com/annecybike/poller/internal/gbfs"
 	"github.com/annecybike/poller/internal/jobs"
+	"github.com/annecybike/poller/internal/routing"
 	"github.com/annecybike/poller/internal/trip"
 )
 
@@ -60,9 +61,33 @@ func main() {
 		slog.Warn("could not hydrate detector state from DB", "err", err)
 	}
 
+	// Build OSRM routing matrix for accurate travel-time matching (ID rotation).
+	buildMatrix := func() {
+		mCtx, mCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer mCancel()
+		stations, err := pool.FetchAllStationCoords(mCtx)
+		if err != nil {
+			slog.Warn("could not fetch station coords for routing matrix", "err", err)
+			return
+		}
+		pts := make([]routing.StationPoint, len(stations))
+		for i, s := range stations {
+			pts[i] = routing.StationPoint{ID: s.ID, Lat: s.Lat, Lon: s.Lon}
+		}
+		m, err := routing.BuildMatrix(mCtx, cfg.OSRMURL, pts)
+		if err != nil {
+			slog.Warn("OSRM matrix unavailable, falling back to haversine", "err", err)
+			return
+		}
+		detector.SetMatrix(m)
+		slog.Info("OSRM routing matrix built", "stations", len(stations), "osrm", cfg.OSRMURL)
+	}
+	buildMatrix()
+
 	slog.Info("poller started", "interval", cfg.PollInterval)
 
 	// Fetch geofencing zones once at startup, then every hour.
+	// Also rebuild the routing matrix hourly (stations rarely change).
 	jobs.PollGeofencing(ctx, client, pool)
 	geoTicker := time.NewTicker(time.Hour)
 	defer geoTicker.Stop()
@@ -73,6 +98,7 @@ func main() {
 				pollCtx, pollCancel := context.WithTimeout(ctx, 30*time.Second)
 				jobs.PollGeofencing(pollCtx, client, pool)
 				pollCancel()
+				buildMatrix()
 			case <-ctx.Done():
 				return
 			}

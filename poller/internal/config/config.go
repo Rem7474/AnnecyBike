@@ -10,6 +10,7 @@ import (
 type Config struct {
 	DBURL        string
 	GBFSURL      string
+	OSRMURL      string
 	PollInterval time.Duration
 }
 
@@ -24,6 +25,11 @@ func Load() (*Config, error) {
 		gbfsURL = "https://gbfs.partners.fifteen.eu/gbfs/annecy/gbfs.json"
 	}
 
+	osrmURL := os.Getenv("OSRM_URL")
+	if osrmURL == "" {
+		osrmURL = "http://router.project-osrm.org"
+	}
+
 	intervalSec := 60
 	if s := os.Getenv("POLL_INTERVAL_SECONDS"); s != "" {
 		v, err := strconv.Atoi(s)
@@ -36,6 +42,7 @@ func Load() (*Config, error) {
 	return &Config{
 		DBURL:        dbURL,
 		GBFSURL:      gbfsURL,
+		OSRMURL:      osrmURL,
 		PollInterval: time.Duration(intervalSec) * time.Second,
 	}, nil
 }

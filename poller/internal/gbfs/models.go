@@ -85,7 +85,7 @@ type Bike struct {
 	IsDisabled         bool    `json:"is_disabled"`
 	VehicleTypeID      string  `json:"vehicle_type_id"`
 	LastReported       int64   `json:"last_reported"`
-	CurrentRangeMeters int     `json:"current_range_meters"`
+	CurrentRangeMeters float64 `json:"current_range_meters"` // spec: non-negative float
 	StationID          string  `json:"station_id"`
 	PricingPlanID      string  `json:"pricing_plan_id"`
 }

@@ -209,6 +209,48 @@ func (p *Pool) FetchStationCoords(ctx context.Context, stationID string) (lat, l
 	return
 }
 
+// StationCoord is a minimal station record used to build the routing matrix.
+type StationCoord struct {
+	ID  string
+	Lat float64
+	Lon float64
+}
+
+// FetchAllStationCoords returns all known stations with their coordinates.
+func (p *Pool) FetchAllStationCoords(ctx context.Context) ([]StationCoord, error) {
+	rows, err := p.Pool.Query(ctx, `SELECT station_id, lat, lon FROM stations ORDER BY station_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []StationCoord
+	for rows.Next() {
+		var s StationCoord
+		if err := rows.Scan(&s.ID, &s.Lat, &s.Lon); err == nil {
+			result = append(result, s)
+		}
+	}
+	return result, rows.Err()
+}
+
+// QueryStationCoords returns a map of station_id → [lat, lon] for coordinate fallback.
+func (p *Pool) QueryStationCoords(ctx context.Context) (map[string][2]float64, error) {
+	rows, err := p.Pool.Query(ctx, `SELECT station_id, lat, lon FROM stations`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := make(map[string][2]float64)
+	for rows.Next() {
+		var sid string
+		var lat, lon float64
+		if err := rows.Scan(&sid, &lat, &lon); err == nil {
+			m[sid] = [2]float64{lat, lon}
+		}
+	}
+	return m, rows.Err()
+}
+
 // FetchBikePathPoints returns ordered (lat, lon) pairs for free-floating snapshots
 // of a given bike between from and to, used for GPS-path distance calculation.
 func (p *Pool) FetchBikePathPoints(ctx context.Context, bikeID string, from, to time.Time) ([][2]float64, error) {

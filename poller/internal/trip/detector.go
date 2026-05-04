@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/annecybike/poller/internal/db"
+	"github.com/annecybike/poller/internal/routing"
 )
 
 type BikeState struct {
@@ -44,6 +45,7 @@ type Detector struct {
 	lastState map[string]BikeState
 	openTrips map[string]openTrip
 	db        *db.Pool
+	matrix    *routing.Matrix // nil until SetMatrix is called; haversine fallback used
 }
 
 func NewDetector(pool *db.Pool) *Detector {
@@ -53,6 +55,10 @@ func NewDetector(pool *db.Pool) *Detector {
 		db:        pool,
 	}
 }
+
+// SetMatrix updates the routing matrix used for travel-time estimation.
+// Safe to call at any time between poll cycles.
+func (d *Detector) SetMatrix(m *routing.Matrix) { d.matrix = m }
 
 // HydrateState loads the most recent known state per bike from the DB so that
 // trip detection survives a poller restart without losing in-flight trips.
@@ -77,10 +83,21 @@ func (d *Detector) HydrateState(ctx context.Context) error {
 
 // Process compares the current poll snapshot against the previous one
 // and detects trip starts/ends.
+//
+// GBFS §free_bike_status: vehicles in active rental are REMOVED from the feed,
+// and bike_id MUST be rotated after each trip (v2.0+). This means we can reliably
+// detect departures (docked bike disappears) but cannot correlate the return to
+// the same bike_id. Returns get a best-effort match via tryMatchArrival; unmatched
+// trips close after 2 hours with end_station = NULL.
 func (d *Detector) Process(ctx context.Context, now time.Time, current map[string]BikeState) {
 	for bikeID, cur := range current {
 		prev, seen := d.lastState[bikeID]
 		if !seen {
+			// Unknown bike_id: either a new deployment or a post-trip ID rotation.
+			// If it appears directly at a station it is likely a rotated return.
+			if cur.StationID != nil && !cur.IsDisabled {
+				d.tryMatchArrival(ctx, now, cur)
+			}
 			d.lastState[bikeID] = cur
 			continue
 		}
@@ -162,9 +179,6 @@ func (d *Detector) Process(ctx context.Context, now time.Time, current map[strin
 	}
 
 	// Handle bikes that disappeared from the feed.
-	// Keep state alive for up to 2 hours so the teleport case can fire when the
-	// bike returns (covers rentals where the provider removes the bike from the
-	// GBFS feed while it is in use).
 	for bikeID, prev := range d.lastState {
 		if _, stillPresent := current[bikeID]; stillPresent {
 			continue
@@ -181,15 +195,126 @@ func (d *Detector) Process(ctx context.Context, now time.Time, current map[strin
 			if now.Sub(prev.SeenAt) > 2*time.Hour {
 				d.closeTrip(ctx, bikeID, ot, prev.SeenAt, prev)
 				delete(d.openTrips, bikeID)
-			} else {
-				continue // within 2-hour window — keep state and open trip alive
 			}
+			// Within 2-hour window: keep state and open trip alive waiting for return.
+		} else if prev.StationID != nil && !prev.IsDisabled {
+			// Docked, non-disabled bike vanished from feed — per GBFS spec the vehicle
+			// is now in active rental. Open the trip immediately; the arrival will either
+			// be matched via tryMatchArrival (ID rotation) or closed after 2 h (timeout).
+			d.openTrips[bikeID] = openTrip{
+				startTime:      prev.SeenAt,
+				startStationID: prev.StationID,
+				startLat:       prev.Lat,
+				startLon:       prev.Lon,
+				batteryStart:   prev.Battery,
+			}
+			slog.Info("trip started (bike left feed)", "bike", bikeID, "from_station", stationStr(prev.StationID))
 		}
 
 		if now.Sub(prev.SeenAt) > 2*time.Hour {
 			delete(d.lastState, bikeID)
 		}
 	}
+}
+
+// tryMatchArrival attempts to close the best open trip when a new bike_id appears
+// at a station — the signature of a post-rental ID rotation (GBFS §free_bike_status v2.0+).
+//
+// A candidate trip must satisfy the cycling time window: the elapsed time since
+// departure must be consistent with traveling the straight-line distance between
+// stations at 8–25 km/h (with a ×1.3 route detour factor and a ×1.5 upper buffer
+// for stops and slow riders). Among valid candidates the one whose elapsed time is
+// closest to 15 km/h average (the most likely speed) is chosen.
+// If no candidate falls within the window, the arrival is ignored — it may be a
+// freshly-deployed bike or a GBFS echo; the open trips will close via 2-hour timeout.
+func (d *Detector) tryMatchArrival(ctx context.Context, now time.Time, arrived BikeState) {
+	var bestKey string
+	var bestScore time.Duration
+
+	for key, ot := range d.openTrips {
+		if ot.pendingClose != nil {
+			continue
+		}
+		if sameStation(ot.startStationID, arrived.StationID) {
+			continue // same-station returns handled by pendingClose path
+		}
+
+		elapsed := now.Sub(ot.startTime)
+
+		// Use OSRM road distance when both station IDs are known; otherwise fall
+		// back to haversine straight-line (×1.3 detour factor) via cyclingWindow.
+		var minT, maxT, expectedT time.Duration
+		if d.matrix != nil && ot.startStationID != nil && arrived.StationID != nil {
+			var ok bool
+			minT, maxT, expectedT, ok = d.matrix.TravelWindow(*ot.startStationID, *arrived.StationID)
+			if !ok {
+				dist := haversineRaw(ot.startLat, ot.startLon, arrived.Lat, arrived.Lon)
+				minT, maxT, expectedT = cyclingWindow(dist)
+			}
+		} else {
+			dist := haversineRaw(ot.startLat, ot.startLon, arrived.Lat, arrived.Lon)
+			minT, maxT, expectedT = cyclingWindow(dist)
+		}
+
+		if elapsed < minT || elapsed > maxT {
+			continue // elapsed time incompatible with cycling distance
+		}
+
+		// Score = |elapsed − expected|; lower is better.
+		score := elapsed - expectedT
+		if score < 0 {
+			score = -score
+		}
+		if bestKey == "" || score < bestScore {
+			bestKey = key
+			bestScore = score
+		}
+	}
+
+	if bestKey == "" {
+		return
+	}
+
+	ot := d.openTrips[bestKey]
+	slog.Info("trip matched via ID rotation",
+		"old_bike", bestKey,
+		"new_bike_station", stationStr(arrived.StationID),
+		"elapsed", now.Sub(ot.startTime).Round(time.Second),
+		"score", bestScore.Round(time.Second),
+	)
+	d.closeTrip(ctx, bestKey, ot, now, arrived)
+	delete(d.openTrips, bestKey)
+}
+
+// cyclingWindow returns the (min, max, expected) travel durations for a given
+// straight-line distance, assuming cyclists travel at 8–25 km/h on routes that
+// are on average 30 % longer than the straight-line distance.
+//
+//	min  = distance × 1.3 / 25 km/h  (fastest realistic cyclist, floored at 60 s)
+//	max  = distance × 1.3 / 8 km/h × 1.5  (slowest + 50 % buffer, floored at 5 min)
+//	expected = distance × 1.3 / 15 km/h  (average urban cycling speed)
+func cyclingWindow(distanceM float64) (min, max, expected time.Duration) {
+	const (
+		routeFactor = 1.3
+		fastKmh     = 25.0
+		slowKmh     = 8.0
+		avgKmh      = 15.0
+		bufferFactor = 1.5
+	)
+	actual := distanceM * routeFactor
+	toSec := func(speedKmh float64) time.Duration {
+		return time.Duration(actual/(speedKmh/3.6)*float64(time.Second))
+	}
+	min = toSec(fastKmh)
+	if min < 60*time.Second {
+		min = 60 * time.Second
+	}
+	max = time.Duration(float64(toSec(slowKmh)) * bufferFactor)
+	if max < 5*time.Minute {
+		max = 5 * time.Minute
+	}
+	expected = toSec(avgKmh)
+	return
 }
 
 // gpsPathDistance computes the total estimated cycling distance by walking the
