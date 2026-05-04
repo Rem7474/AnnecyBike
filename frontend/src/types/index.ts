@@ -44,6 +44,7 @@ export interface PhysicalBike {
   last_seen: string
   total_trips: number
   total_distance_km: number
+  id_count?: number
   current_battery_pct?: number
   current_station_name?: string
   is_currently_disabled?: boolean

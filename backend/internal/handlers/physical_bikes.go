@@ -20,10 +20,12 @@ func GetPhysicalBikes(pool *db.Pool) gin.HandlerFunc {
 				pb.custom_name,
 				pb.first_seen,
 				pb.last_seen,
-				COUNT(t.id) AS total_trips,
-				COALESCE(SUM(t.distance_meters), 0) / 1000.0 AS total_distance_km
+				COUNT(DISTINCT t.id)     AS total_trips,
+				COALESCE(SUM(t.distance_meters), 0) / 1000.0 AS total_distance_km,
+				COUNT(DISTINCT bk.bike_id) AS bike_id_count
 			FROM physical_bikes pb
-			LEFT JOIN trips t ON t.physical_bike_id = pb.id
+			LEFT JOIN trips t  ON t.physical_bike_id  = pb.id
+			LEFT JOIN bikes bk ON bk.physical_bike_id = pb.id
 			GROUP BY pb.id, pb.vehicle_type_id, pb.fleet_number, pb.custom_name, pb.first_seen, pb.last_seen
 			ORDER BY pb.last_seen DESC
 			LIMIT 500
@@ -37,10 +39,12 @@ func GetPhysicalBikes(pool *db.Pool) gin.HandlerFunc {
 		bikes := make([]models.PhysicalBike, 0, 200)
 		for rows.Next() {
 			var b models.PhysicalBike
+			var idCount int
 			if err := rows.Scan(&b.ID, &b.VehicleTypeID, &b.FleetNumber, &b.CustomName,
-				&b.FirstSeen, &b.LastSeen, &b.TotalTrips, &b.TotalDistanceKm); err != nil {
+				&b.FirstSeen, &b.LastSeen, &b.TotalTrips, &b.TotalDistanceKm, &idCount); err != nil {
 				continue
 			}
+			b.IDCount = &idCount
 			bikes = append(bikes, b)
 		}
 		c.JSON(http.StatusOK, bikes)

@@ -6,6 +6,7 @@ import { StationDetailPage } from './pages/StationDetailPage'
 import { StatsPage } from './pages/StatsPage'
 import { AnomaliesPage } from './pages/AnomaliesPage'
 import { PhysicalBikeDetailPage } from './pages/PhysicalBikeDetailPage'
+import { PhysicalBikeListPage } from './pages/PhysicalBikeListPage'
 import { api } from './api'
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 2, staleTime: 30_000 } } })
@@ -49,6 +50,7 @@ export function App() {
           <span style={{ fontWeight: 700, color: '#f1f5f9', fontSize: 16 }}>🚲 AnnecyBike</span>
           <NavLink to="/" end style={navStyle}>Carte</NavLink>
           <NavLink to="/stats" style={navStyle}>Statistiques</NavLink>
+          <NavLink to="/physical-bikes" style={navStyle}>Vélos</NavLink>
           <NavLink to="/anomalies" style={navStyle}>
             Anomalies<AnomalyBadge />
           </NavLink>
@@ -59,6 +61,7 @@ export function App() {
           <Route path="/stations/:id" element={<StationDetailPage />} />
           <Route path="/stats" element={<StatsPage />} />
           <Route path="/anomalies" element={<AnomaliesPage />} />
+          <Route path="/physical-bikes" element={<PhysicalBikeListPage />} />
           <Route path="/physical-bikes/:id" element={<PhysicalBikeDetailPage />} />
         </Routes>
       </BrowserRouter>

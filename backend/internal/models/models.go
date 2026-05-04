@@ -55,6 +55,7 @@ type PhysicalBike struct {
 	LastSeen        time.Time `json:"last_seen"`
 	TotalTrips      int       `json:"total_trips"`
 	TotalDistanceKm float64   `json:"total_distance_km"`
+	IDCount         *int      `json:"id_count,omitempty"` // number of GBFS bike_ids linked (list endpoint only)
 	// Current state
 	CurrentBatteryPct   *int    `json:"current_battery_pct,omitempty"`
 	CurrentStationName  *string `json:"current_station_name,omitempty"`
