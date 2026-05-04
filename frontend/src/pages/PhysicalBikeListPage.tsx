@@ -57,7 +57,7 @@ type SortKey = 'fleet_number' | 'total_trips' | 'total_distance_km' | 'last_seen
 function relativeTime(iso: string) {
   const diff = Date.now() - new Date(iso).getTime()
   const m = Math.floor(diff / 60_000)
-  if (m < 1) return 'à l'instant'
+  if (m < 1) return "à l'instant"
   if (m < 60) return `il y a ${m} min`
   const h = Math.floor(m / 60)
   if (h < 24) return `il y a ${h} h`
