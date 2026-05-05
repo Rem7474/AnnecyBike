@@ -184,6 +184,23 @@ func (d *Detector) Process(ctx context.Context, now time.Time, current map[strin
 			// Bike moved from one station to another within a single poll window
 			// (short trip not captured as free-floating). Use poll boundaries as
 			// the best available time estimate.
+			//
+			// Guard: if the elapsed time is physically incompatible with cycling
+			// the straight-line distance between the two stations, this is a GBFS
+			// GPS artefact (transient wrong station_id) rather than a real trip.
+			sinceLastSeen := now.Sub(prev.SeenAt)
+			stationDist := haversineRaw(prev.Lat, prev.Lon, cur.Lat, cur.Lon)
+			minCycling, _, _ := cyclingWindow(stationDist)
+			if sinceLastSeen < minCycling {
+				slog.Warn("station teleport skipped (speed violation)",
+					"bike", bikeID,
+					"from", stationStr(prev.StationID),
+					"to", stationStr(cur.StationID),
+					"elapsed", sinceLastSeen.Round(time.Second),
+					"min_expected", minCycling.Round(time.Second),
+				)
+				break
+			}
 			ot := openTrip{
 				startTime:      prev.SeenAt,
 				startStationID: prev.StationID,

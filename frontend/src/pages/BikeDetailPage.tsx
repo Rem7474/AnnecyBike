@@ -1,7 +1,6 @@
-import { CSSProperties } from 'react'
+import { CSSProperties, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { MapContainer, TileLayer, Polyline, CircleMarker, Popup } from 'react-leaflet'
 import { api } from '../api'
 import type { BikeSnapshot } from '../types'
 
@@ -17,6 +16,12 @@ const S: Record<string, CSSProperties> = {
   card: { background: '#1e293b', borderRadius: 8, padding: '12px 20px', minWidth: 140 },
   cardLabel: { fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1 },
   cardValue: { fontSize: 24, fontWeight: 700, marginTop: 4 },
+  infoBlock: {
+    background: '#1e293b', borderRadius: 8, padding: '16px 20px',
+    marginBottom: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16,
+  },
+  infoLabel: { fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
+  infoValue: { fontSize: 13, color: '#f1f5f9' },
   section: { marginTop: 24 },
   sectionTitle: { fontSize: 16, fontWeight: 600, marginBottom: 12, color: '#94a3b8' },
   table: { width: '100%', borderCollapse: 'collapse', fontSize: 13 },
@@ -30,13 +35,29 @@ function batteryColor(pct: number) {
   return '#ef4444'
 }
 
+function fmt(iso: string) {
+  return new Date(iso).toLocaleString('fr-FR', {
+    day: '2-digit', month: '2-digit', year: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
+function elapsed(iso: string) {
+  const ms = Date.now() - new Date(iso).getTime()
+  const m = Math.floor(ms / 60_000)
+  if (m < 1) return "à l'instant"
+  if (m < 60) return `${m} min`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h} h ${m % 60 > 0 ? `${m % 60} min` : ''}`
+  return `${Math.floor(h / 24)} j ${h % 24} h`
+}
+
 export function BikeDetailPage() {
   const { id } = useParams<{ id: string }>()
 
   const { data: bike } = useQuery({ queryKey: ['bike', id], queryFn: () => api.bikes.get(id!) })
-  const { data: trips } = useQuery({ queryKey: ['bike-trips', id], queryFn: () => api.bikes.trips(id!, 5) })
+  const { data: trips } = useQuery({ queryKey: ['bike-trips', id], queryFn: () => api.bikes.trips(id!, 20) })
 
-  // Current session GPS track (raw, 24h) — also used for live state
   const { data: trajectory } = useQuery({
     queryKey: ['bike-trajectory', id],
     queryFn: () => {
@@ -46,14 +67,9 @@ export function BikeDetailPage() {
     },
   })
 
-  const trajectoryPoints = (trajectory ?? [])
-    .filter((s: BikeSnapshot) => s.station_id === null && s.lat !== 0 && s.lon !== 0)
-    .map((s: BikeSnapshot) => [s.lat, s.lon] as [number, number])
-    .reverse()
-
-  // Latest snapshot for current battery/status
+  // trajectory is DESC (most recent first); last element = oldest
   const latestSnapshot: BikeSnapshot | null =
-    trajectory && trajectory.length > 0 ? trajectory[trajectory.length - 1] : null
+    trajectory && trajectory.length > 0 ? trajectory[0] : null
 
   const batteryPct = latestSnapshot
     ? Math.round((latestSnapshot.current_range_meters / 45000) * 100)
@@ -64,7 +80,22 @@ export function BikeDetailPage() {
     ? Math.round(latestSnapshot.current_range_meters / 1000)
     : batteryPct !== null ? Math.round((batteryPct / 100) * 45) : null
 
-  const mapCenter: [number, number] = trajectoryPoints[0] ?? [45.899, 6.129]
+  // Arrival time at current station: walk back through DESC snapshots while station_id matches
+  const currentStationId = latestSnapshot?.station_id ?? bike?.current_station_id ?? null
+  const arrivalTime = useMemo(() => {
+    if (!currentStationId || !trajectory || trajectory.length === 0) return null
+    // trajectory[0] is most recent; find the oldest contiguous snapshot at this station
+    let earliest: string | null = null
+    for (const s of trajectory) {
+      if (s.station_id === currentStationId) earliest = s.time
+      else break
+    }
+    return earliest
+  }, [trajectory, currentStationId])
+
+  const stationName = latestSnapshot?.station_id
+    ? (bike?.current_station_name ?? latestSnapshot.station_id)
+    : bike?.current_station_name ?? null
 
   return (
     <div style={S.page}>
@@ -78,19 +109,15 @@ export function BikeDetailPage() {
 
       <div style={S.notice}>
         ⚠ Les identifiants vélo sont temporaires (rotation après chaque trajet, spec GBFS v2.0).
-        Cette page affiche uniquement la <strong>session courante</strong> — l'historique complet
-        est consultable par station.
+        Cette page affiche uniquement la <strong>session courante</strong>.{' '}
+        {bike?.physical_bike_id
+          ? <Link to={`/physical-bikes/${bike.physical_bike_id}`} style={{ color: '#38bdf8' }}>
+              Voir l'historique complet du vélo physique →
+            </Link>
+          : "Assignez ce vélo à sa fiche physique depuis la page station."}
       </div>
 
-      {bike?.physical_bike_id && (
-        <div style={{ marginBottom: 16 }}>
-          <Link to={`/physical-bikes/${bike.physical_bike_id}`} style={{ color: '#38bdf8', fontSize: 13 }}>
-            → Voir l'historique complet du vélo physique #{bike.physical_bike_id}
-          </Link>
-        </div>
-      )}
-
-      {/* Current state */}
+      {/* Current state cards */}
       <div style={S.cards}>
         <div style={{ ...S.card, borderLeft: `4px solid ${batteryColor(batteryPct ?? 0)}` }}>
           <div style={S.cardLabel}>Batterie</div>
@@ -114,26 +141,50 @@ export function BikeDetailPage() {
         </div>
       </div>
 
-      {/* Trajectory map */}
-      <div style={S.section}>
-        <div style={S.sectionTitle}>Trajectoire (session courante)</div>
-        <div style={{ borderRadius: 8, overflow: 'hidden', height: 300 }}>
-          <MapContainer center={mapCenter} zoom={14} style={{ height: '100%' }} zoomControl={false}>
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="" />
-            {trajectoryPoints.length > 1 && (
-              <Polyline positions={trajectoryPoints} pathOptions={{ color: '#38bdf8', weight: 2 }} />
-            )}
-            {trajectoryPoints.length > 0 && (
-              <CircleMarker center={trajectoryPoints[trajectoryPoints.length - 1]} radius={5}
-                pathOptions={{ color: '#38bdf8', fillColor: '#38bdf8', fillOpacity: 1 }}>
-                <Popup>Dernière position connue</Popup>
-              </CircleMarker>
-            )}
-          </MapContainer>
+      {/* Info block: station + timing */}
+      <div style={S.infoBlock}>
+        <div>
+          <div style={S.infoLabel}>Station actuelle</div>
+          <div style={S.infoValue}>
+            {currentStationId
+              ? <Link to={`/stations/${currentStationId}`} style={{ color: '#38bdf8', textDecoration: 'none' }}>
+                  {stationName ?? currentStationId}
+                </Link>
+              : <span style={{ color: '#64748b' }}>En transit / hors station</span>}
+          </div>
+        </div>
+        <div>
+          <div style={S.infoLabel}>Présent depuis</div>
+          <div style={S.infoValue}>
+            {arrivalTime
+              ? <><span style={{ color: '#34d399' }}>{elapsed(arrivalTime)}</span>{' '}
+                  <span style={{ color: '#64748b', fontSize: 11 }}>({fmt(arrivalTime)})</span></>
+              : <span style={{ color: '#64748b' }}>—</span>}
+          </div>
+        </div>
+        <div>
+          <div style={S.infoLabel}>Première apparition (session)</div>
+          <div style={S.infoValue}>
+            {bike?.first_seen
+              ? <>{fmt(bike.first_seen)}<span style={{ color: '#64748b', fontSize: 11, marginLeft: 6 }}>
+                  (il y a {elapsed(bike.first_seen)})
+                </span></>
+              : '—'}
+          </div>
+        </div>
+        <div>
+          <div style={S.infoLabel}>Dernière mise à jour</div>
+          <div style={S.infoValue}>
+            {bike?.last_seen
+              ? <>{fmt(bike.last_seen)}<span style={{ color: '#64748b', fontSize: 11, marginLeft: 6 }}>
+                  (il y a {elapsed(bike.last_seen)})
+                </span></>
+              : '—'}
+          </div>
         </div>
       </div>
 
-      {/* Trips this session */}
+      {/* Trips */}
       <div style={S.section}>
         <div style={S.sectionTitle}>Trajets (session courante)</div>
         <table style={S.table}>
@@ -142,26 +193,41 @@ export function BikeDetailPage() {
               <th style={S.th}>Départ</th>
               <th style={S.th}>Durée</th>
               <th style={S.th}>Distance</th>
-              <th style={S.th}>Batterie consommée</th>
-              <th style={S.th}>Station départ → arrivée</th>
+              <th style={S.th}>Batterie</th>
+              <th style={S.th}>Itinéraire</th>
             </tr>
           </thead>
           <tbody>
-            {(trips ?? []).map((t) => (
-              <tr key={t.id}>
-                <td style={S.td}>{new Date(t.start_time).toLocaleString('fr-FR')}</td>
-                <td style={S.td}>{t.duration_minutes != null ? `${Math.round(t.duration_minutes)} min` : '—'}</td>
-                <td style={S.td}>{t.distance_meters != null ? `${(t.distance_meters / 1000).toFixed(1)} km` : '—'}</td>
-                <td style={S.td}>
-                  {t.battery_delta != null
-                    ? <span style={{ color: '#f97316' }}>−{Math.round((Math.abs(t.battery_delta) / 45000) * 100)}%</span>
-                    : '—'}
-                </td>
-                <td style={{ ...S.td, fontSize: 12, color: '#64748b' }}>
-                  {t.start_station_name ?? '?'} → {t.end_station_name ?? '?'}
-                </td>
-              </tr>
-            ))}
+            {(trips ?? []).map((t, i, arr) => {
+              // Trips are DESC: arr[i+1] is the trip just before this one.
+              // Arrival of previous trip should match departure of this trip.
+              const prevTrip = arr[i + 1]
+              const teleport = prevTrip &&
+                prevTrip.end_station_name &&
+                t.start_station_name &&
+                prevTrip.end_station_name !== t.start_station_name
+              return (
+                <tr key={t.id} style={teleport ? { background: '#2d1f0f' } : undefined}>
+                  <td style={S.td}>{fmt(t.start_time)}</td>
+                  <td style={S.td}>{t.duration_minutes != null ? `${Math.round(t.duration_minutes)} min` : '—'}</td>
+                  <td style={S.td}>{t.distance_meters != null ? `${(t.distance_meters / 1000).toFixed(1)} km` : '—'}</td>
+                  <td style={S.td}>
+                    {t.battery_delta != null
+                      ? <span style={{ color: '#f97316' }}>−{Math.round((Math.abs(t.battery_delta) / 45000) * 100)}%</span>
+                      : '—'}
+                  </td>
+                  <td style={{ ...S.td, fontSize: 12 }}>
+                    {teleport && (
+                      <span title={`Téléportation détectée : arrivée précédente "${prevTrip.end_station_name}" ≠ départ actuel "${t.start_station_name}"`}
+                        style={{ color: '#f97316', marginRight: 6, cursor: 'help' }}>⚠</span>
+                    )}
+                    <span style={{ color: '#64748b' }}>
+                      {t.start_station_name ?? '?'} → {t.end_station_name ?? '?'}
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
             {(trips ?? []).length === 0 && (
               <tr><td colSpan={5} style={{ ...S.td, color: '#64748b' }}>Aucun trajet pour cette session</td></tr>
             )}
