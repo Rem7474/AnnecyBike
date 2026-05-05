@@ -1,7 +1,7 @@
 import type {
   Anomaly, Bike, BikeLive, BikeHealth, BikeSnapshot, BikeStats,
   BusiestStation, BatteryBucket, DailyCount, FleetStats,
-  GeoJsonFeatureCollection, HeatPoint, NearestBike, NearestStation, PhysicalBike, ReplayBucket,
+  GeoJsonFeatureCollection, HeatPoint, HourlyBikeStats, NearestBike, NearestStation, PhysicalBike, ReplayBucket,
   Station, StationBike, StationBikeVisit, Trip,
 } from '../types'
 
@@ -69,6 +69,8 @@ export const api = {
       get<NearestStation[]>(`${BASE}/stations/nearest?lat=${lat}&lon=${lon}&limit=${limit}`),
     bikeHistory: (id: string, hours = 48) =>
       get<StationBikeVisit[]>(`${BASE}/stations/${id}/bike-history?hours=${hours}`),
+    hourlyStats: (id: string, days = 90) =>
+      get<HourlyBikeStats[]>(`${BASE}/stations/${id}/hourly-stats?days=${days}`),
   },
   physicalBikes: {
     list: () => get<PhysicalBike[]>(`${BASE}/physical-bikes`),

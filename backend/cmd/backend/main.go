@@ -73,6 +73,7 @@ func main() {
 		v1.GET("/stations/:id/bikes", handlers.GetStationBikes(pool))
 		v1.GET("/stations/:id/history", handlers.GetStationHistory(pool))
 		v1.GET("/stations/:id/bike-history", handlers.GetStationBikeHistory(pool))
+		v1.GET("/stations/:id/hourly-stats", handlers.GetStationHourlyStats(pool))
 
 		v1.GET("/physical-bikes", handlers.GetPhysicalBikes(pool))
 		v1.GET("/physical-bikes/:pid", handlers.GetPhysicalBike(pool))

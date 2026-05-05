@@ -186,6 +186,14 @@ type StationBike struct {
 	FleetNumber    *string `json:"fleet_number,omitempty"`
 }
 
+type HourlyBikeStats struct {
+	Hour        int     `json:"hour"`
+	AvgAll      float64 `json:"avg_all"`
+	AvgWeekday  float64 `json:"avg_weekday"`
+	AvgWeekend  float64 `json:"avg_weekend"`
+	SampleCount int     `json:"sample_count"`
+}
+
 type HeatPoint struct {
 	Lat    float64 `json:"lat"`
 	Lon    float64 `json:"lon"`

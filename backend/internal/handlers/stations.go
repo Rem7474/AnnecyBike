@@ -282,6 +282,49 @@ func GetStationBikeHistory(pool *db.Pool) gin.HandlerFunc {
 	}
 }
 
+func GetStationHourlyStats(pool *db.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		stationID := c.Param("id")
+		days, _ := strconv.Atoi(c.DefaultQuery("days", "90"))
+		if days <= 0 || days > 365 {
+			days = 90
+		}
+
+		rows, err := pool.Query(c.Request.Context(), `
+			SELECT
+				EXTRACT(HOUR FROM time AT TIME ZONE 'Europe/Paris')::int AS hour,
+				ROUND(AVG(num_bikes_available)::numeric, 2)::float8 AS avg_all,
+				ROUND(COALESCE(AVG(num_bikes_available) FILTER (
+					WHERE EXTRACT(DOW FROM time AT TIME ZONE 'Europe/Paris') BETWEEN 1 AND 5
+				), 0)::numeric, 2)::float8 AS avg_weekday,
+				ROUND(COALESCE(AVG(num_bikes_available) FILTER (
+					WHERE EXTRACT(DOW FROM time AT TIME ZONE 'Europe/Paris') IN (0, 6)
+				), 0)::numeric, 2)::float8 AS avg_weekend,
+				COUNT(*)::int AS sample_count
+			FROM station_snapshots
+			WHERE station_id = $1
+			  AND time > NOW() - INTERVAL '1 day' * $2
+			GROUP BY hour
+			ORDER BY hour
+		`, stationID, days)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+
+		result := make([]models.HourlyBikeStats, 0, 24)
+		for rows.Next() {
+			var h models.HourlyBikeStats
+			if err := rows.Scan(&h.Hour, &h.AvgAll, &h.AvgWeekday, &h.AvgWeekend, &h.SampleCount); err != nil {
+				continue
+			}
+			result = append(result, h)
+		}
+		c.JSON(http.StatusOK, result)
+	}
+}
+
 func GetStationHistory(pool *db.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		stationID := c.Param("id")

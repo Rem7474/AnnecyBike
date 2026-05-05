@@ -168,6 +168,14 @@ export interface GeoJsonFeatureCollection {
   }[]
 }
 
+export interface HourlyBikeStats {
+  hour: number
+  avg_all: number
+  avg_weekday: number
+  avg_weekend: number
+  sample_count: number
+}
+
 export interface HeatPoint {
   lat: number
   lon: number

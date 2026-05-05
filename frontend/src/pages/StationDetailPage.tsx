@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
+import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts'
 import { api } from '../api'
 
 const S: Record<string, React.CSSProperties> = {
@@ -86,6 +86,12 @@ export function StationDetailPage() {
     queryFn: () => api.stations.bikeHistory(id!, bikeHistoryHours),
   })
 
+  const [hourlyDays, setHourlyDays] = useState(90)
+  const { data: hourlyStats } = useQuery({
+    queryKey: ['station-hourly', id, hourlyDays],
+    queryFn: () => api.stations.hourlyStats(id!, hourlyDays),
+  })
+
   const chartData = (history ?? []).map((h) => ({
     time: new Date(h.time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
     bikes: h.num_bikes_available,
@@ -127,6 +133,50 @@ export function StationDetailPage() {
             </AreaChart>
           </ResponsiveContainer>
         </div>
+      </div>
+
+      {/* Hourly bike availability profile */}
+      <div style={S.section}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <div style={S.sectionTitle}>Profil horaire moyen</div>
+          <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+            {[30, 60, 90].map(d => (
+              <button key={d} onClick={() => setHourlyDays(d)} style={{
+                padding: '3px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer', border: 'none',
+                background: hourlyDays === d ? '#38bdf8' : '#1e293b',
+                color: hourlyDays === d ? '#0f172a' : '#64748b',
+                fontWeight: hourlyDays === d ? 700 : 400,
+              }}>{d}j</button>
+            ))}
+          </div>
+        </div>
+        {(hourlyStats ?? []).length === 0 ? (
+          <div style={{ color: '#64748b', fontSize: 13 }}>Pas encore assez de données</div>
+        ) : (
+          <div style={{ background: '#1e293b', borderRadius: 8, padding: 16 }}>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={(hourlyStats ?? []).map(h => ({
+                h: `${String(h.hour).padStart(2, '0')}h`,
+                Semaine: h.avg_weekday,
+                'Week-end': h.avg_weekend,
+              }))} barCategoryGap="20%">
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                <XAxis dataKey="h" tick={{ fill: '#64748b', fontSize: 10 }} interval={1} />
+                <YAxis tick={{ fill: '#64748b', fontSize: 11 }} allowDecimals={false} />
+                <Tooltip
+                  contentStyle={{ background: '#0f172a', border: '1px solid #334155', fontSize: 12 }}
+                  formatter={(v: number) => v.toFixed(1)}
+                />
+                <Legend wrapperStyle={{ fontSize: 12, color: '#94a3b8' }} />
+                <Bar dataKey="Semaine" fill="#38bdf8" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="Week-end" fill="#f97316" radius={[2, 2, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            <div style={{ fontSize: 11, color: '#475569', marginTop: 8, textAlign: 'right' }}>
+              Moyenne sur {hourlyDays} jours · heure locale (Europe/Paris)
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Bikes currently docked */}
