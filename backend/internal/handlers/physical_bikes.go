@@ -143,6 +143,45 @@ func GetPhysicalBike(pool *db.Pool) gin.HandlerFunc {
 	}
 }
 
+// DeletePhysicalBike handles DELETE /physical-bikes/:pid
+// Unlinks all bikes and trips from this physical bike, then deletes the record.
+func DeletePhysicalBike(pool *db.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		pid, err := strconv.ParseInt(c.Param("pid"), 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+			return
+		}
+		ctx := c.Request.Context()
+
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		defer tx.Rollback(ctx)
+
+		if _, err := tx.Exec(ctx, `UPDATE bikes  SET physical_bike_id = NULL WHERE physical_bike_id = $1`, pid); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if _, err := tx.Exec(ctx, `UPDATE trips  SET physical_bike_id = NULL WHERE physical_bike_id = $1`, pid); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM physical_bikes WHERE id = $1`, pid); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
 // UpdatePhysicalBike handles PATCH /physical-bikes/:pid
 // Accepts fleet_number and/or custom_name; pass null to clear.
 func UpdatePhysicalBike(pool *db.Pool) gin.HandlerFunc {

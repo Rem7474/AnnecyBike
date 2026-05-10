@@ -4,6 +4,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api'
 import type { PhysicalBike } from '../types'
 
+function label(b: PhysicalBike) {
+  if (b.fleet_number) return `#${b.fleet_number}`
+  if (b.custom_name) return b.custom_name
+  return `#${String(b.id).padStart(6, '0')}`
+}
+
 const S: Record<string, CSSProperties> = {
   page: { padding: 24, maxWidth: 1100, margin: '0 auto' },
   title: { fontSize: 22, fontWeight: 700, marginBottom: 4 },
@@ -80,6 +86,7 @@ export function PhysicalBikeListPage() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editFleet, setEditFleet] = useState('')
   const [editName, setEditName] = useState('')
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
 
   const { data: bikes = [], isLoading } = useQuery({
     queryKey: ['physical-bikes'],
@@ -93,6 +100,14 @@ export function PhysicalBikeListPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['physical-bikes'] })
       setEditingId(null)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => api.physicalBikes.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['physical-bikes'] })
+      setConfirmDeleteId(null)
     },
   })
 
@@ -279,19 +294,28 @@ export function PhysicalBikeListPage() {
                   <td style={{ ...S.td, whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
                     {isEditing ? (
                       <span style={{ display: 'flex', gap: 4 }}>
-                        <button
-                          style={S.saveBtn}
-                          onClick={e => saveEdit(e, b.id)}
-                          disabled={updateMutation.isPending}
-                        >
-                          ✓
-                        </button>
+                        <button style={S.saveBtn} onClick={e => saveEdit(e, b.id)} disabled={updateMutation.isPending}>✓</button>
                         <button style={S.cancelBtn} onClick={cancelEdit}>✕</button>
                       </span>
+                    ) : confirmDeleteId === b.id ? (
+                      <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, color: '#ef4444' }}>Supprimer {label(b)} ?</span>
+                        <button
+                          style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: 4, padding: '3px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+                          onClick={e => { e.stopPropagation(); deleteMutation.mutate(b.id) }}
+                          disabled={deleteMutation.isPending}
+                        >Oui</button>
+                        <button style={S.cancelBtn} onClick={e => { e.stopPropagation(); setConfirmDeleteId(null) }}>Non</button>
+                      </span>
                     ) : (
-                      <button style={S.iconBtn} onClick={e => startEdit(e, b)} title="Modifier">
-                        ✏
-                      </button>
+                      <span style={{ display: 'flex', gap: 2 }}>
+                        <button style={S.iconBtn} onClick={e => startEdit(e, b)} title="Modifier">✏</button>
+                        <button
+                          style={{ ...S.iconBtn, color: '#475569' }}
+                          onClick={e => { e.stopPropagation(); setConfirmDeleteId(b.id) }}
+                          title="Supprimer"
+                        >🗑</button>
+                      </span>
                     )}
                   </td>
                 </tr>

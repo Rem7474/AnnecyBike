@@ -1,5 +1,5 @@
 import { CSSProperties, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -77,8 +77,10 @@ export function PhysicalBikeDetailPage() {
   const { id } = useParams<{ id: string }>()
   const numId = Number(id)
   const qc = useQueryClient()
+  const navigate = useNavigate()
 
   const [editing, setEditing] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [fleetInput, setFleetInput] = useState('')
   const [nameInput, setNameInput] = useState('')
 
@@ -113,6 +115,14 @@ export function PhysicalBikeDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['physical-bike', id] })
       setEditing(false)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => api.physicalBikes.delete(numId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['physical-bikes'] })
+      navigate('/physical-bikes')
     },
   })
 
@@ -186,6 +196,22 @@ export function PhysicalBikeDetailPage() {
           )}
         </div>
         <button style={S.editBtn} onClick={startEdit}>✏ Modifier</button>
+        {confirmDelete ? (
+          <span style={{ display: 'flex', gap: 6, alignItems: 'center', marginLeft: 8 }}>
+            <span style={{ fontSize: 12, color: '#ef4444' }}>Supprimer définitivement ?</span>
+            <button
+              onClick={() => deleteMutation.mutate()}
+              disabled={deleteMutation.isPending}
+              style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+            >Oui, supprimer</button>
+            <button onClick={() => setConfirmDelete(false)} style={S.cancelBtn}>Annuler</button>
+          </span>
+        ) : (
+          <button
+            style={{ ...S.editBtn, color: '#ef4444', borderColor: '#ef4444', marginLeft: 4 }}
+            onClick={() => setConfirmDelete(true)}
+          >🗑 Supprimer</button>
+        )}
       </div>
 
       <div style={S.subtitle}>

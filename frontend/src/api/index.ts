@@ -79,6 +79,7 @@ export const api = {
       patch<{ ok: boolean }>(`${BASE}/physical-bikes/${id}`, body),
     reassign: (bikeId: string, physicalBikeId: number) =>
       patch<{ ok: boolean }>(`${BASE}/bikes/${bikeId}/reassign`, { physical_bike_id: physicalBikeId }),
+    delete: (id: number) => fetch(`${BASE}/physical-bikes/${id}`, { method: 'DELETE' }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`) }),
     trips: (id: number, limit = 50, offset = 0) =>
       get<Trip[]>(`${BASE}/physical-bikes/${id}/trips?limit=${limit}&offset=${offset}`),
     history: (id: number, from?: string, to?: string) => {
